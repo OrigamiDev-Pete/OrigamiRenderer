@@ -25,7 +25,7 @@ window_proc :: proc "stdcall" (hWnd: win32.HWND, msg: win32.UINT, wParam: win32.
             when ODIN_DEBUG {
                 fmt.println("WM_DESTROY")
             }
-            win32.PostQuitMessage(1)
+            win32.PostQuitMessage(0)
             return 0
         }
         case: {
@@ -48,7 +48,6 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32) -> (Window,
     win32.RegisterClassW(&wc)
 
     utf16_title := make([]u16, len(title), context.temp_allocator)
-    defer delete(utf16_title)
     utf16.encode_string(utf16_title[:], title) 
 
     hWnd := win32.CreateWindowW(wc.lpszClassName, &utf16_title[0], win32.WS_OVERLAPPEDWINDOW, x, y, width, height, nil, nil, wc.hInstance, nil)
