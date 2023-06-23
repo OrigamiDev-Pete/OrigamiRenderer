@@ -12,7 +12,7 @@ origamiWindow: ^Window = nil
 CLASS_NAME :: "Origami Window Class"
 
 window_proc :: proc "stdcall" (hWnd: win32.HWND, msg: win32.UINT, wParam: win32.WPARAM, lParam: win32.LPARAM) -> win32.LRESULT {
-    context = origamiWindow.odinContext^
+    context = origamiWindow.odin_context^
 
     switch msg {
         case win32.WM_SIZE: {
@@ -50,15 +50,14 @@ window_proc :: proc "stdcall" (hWnd: win32.HWND, msg: win32.UINT, wParam: win32.
 
 _create_window :: proc(width, height: i32, title: string, x, y: i32) -> (^Window, Window_Error) {
     // Register the window class.
-
-    utf16_class_name: [len(CLASS_NAME)]u16
-    utf16.encode_string(utf16_class_name[:], CLASS_NAME)
-
+    class_name := win32.L(CLASS_NAME)
 
     wc: win32.WNDCLASSW
+    wc.style = win32.CS_HREDRAW | win32.CS_VREDRAW | win32.CS_OWNDC
     wc.lpfnWndProc = window_proc
     wc.hInstance = cast(win32.HINSTANCE) win32.GetModuleHandleW(nil)
-    wc.lpszClassName = &utf16_class_name[0]
+    wc.lpszClassName = &class_name[0]
+    wc.hCursor = win32.LoadCursorW(nil, cast([^]u16)&win32.IDC_ARROW)
 
     win32.RegisterClassW(&wc)
 
@@ -73,7 +72,7 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32) -> (^Window
         x = x,
         y = y,
         callbacks = {},
-        odinContext = ctx,
+        odin_context = ctx,
     })
     origamiWindow = window
 
@@ -91,14 +90,17 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32) -> (^Window
 }
 
 _destroy_window :: proc(window: ^Window) {
-    free(window.odinContext)
+    free(window.odin_context)
     free(window)
 }
 
 _window_should_close :: proc(window: ^Window) -> bool {
+    should_quit := false
     msg: win32.MSG
-    should_quit := !win32.GetMessageW(&msg, nil, 0, 0)
-    win32.TranslateMessage(&msg)
-    win32.DispatchMessageW(&msg)
+    for win32.PeekMessageW(&msg, nil, 0, 0, win32.PM_REMOVE) {
+        should_quit = msg.message == win32.WM_QUIT
+        win32.TranslateMessage(&msg)
+        win32.DispatchMessageW(&msg)
+    }
     return cast(bool) should_quit
 }

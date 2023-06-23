@@ -10,7 +10,7 @@ Window :: struct {
     title:  string,
 
     callbacks: Window_Callbacks,
-    odinContext: ^runtime.Context,
+    odin_context: ^runtime.Context,
 
     // Platform Specific
     win32_handle: rawptr,
