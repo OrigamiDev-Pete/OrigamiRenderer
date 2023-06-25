@@ -41,10 +41,10 @@ window_should_close :: proc(window: ^Window) -> bool {
     return _window_should_close(window)
 }
 
-window_set_on_resize_callback :: proc(window: ^Window, callback: #type proc (window: ^Window, width, height: u16)) {
+window_set_on_resize_callback :: proc(window: ^Window, callback: #type proc(window: ^Window, width, height: u16)) {
     window.callbacks.on_resize = callback
 }
 
-window_set_on_close_callback :: proc(window: ^Window, callback: #type proc (window: ^Window)) {
+window_set_on_close_callback :: proc(window: ^Window, callback: #type proc(window: ^Window)) {
     window.callbacks.on_close = callback
 }

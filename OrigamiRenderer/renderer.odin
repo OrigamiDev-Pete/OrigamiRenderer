@@ -3,7 +3,7 @@ package OrigamiRenderer
 import vk "vendor:vulkan"
 
 Renderer :: struct {
-    vk_instance: vk.Instance
+    vk: Vulkan_Properties,
 }
 
 Render_API :: enum {
@@ -18,7 +18,9 @@ Render_API :: enum {
 
 Error :: enum {
     Success,
-    Cannot_Create_Instance
+    Cannot_Create_Instance,
+    Validation_Layer_Not_Supported,
+    Cannot_Create_Debug_Messenger,
 }
 
 @(private)
