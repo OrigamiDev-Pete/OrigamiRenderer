@@ -16,7 +16,6 @@ main :: proc() {
 	tracking_allocator: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&tracking_allocator, context.allocator)
 	context.allocator = mem.tracking_allocator(&tracking_allocator)
-	fmt.println(context.logger)
 
 	result := run()
 

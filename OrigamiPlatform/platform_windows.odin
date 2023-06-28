@@ -21,7 +21,7 @@ window_proc :: proc "stdcall" (hWnd: win32.HWND, msg: win32.UINT, wParam: win32.
             }
             width := win32.LOWORD(cast(win32.DWORD)lParam)
             height := win32.HIWORD(cast(win32.DWORD)lParam)
-            if (origamiWindow.callbacks.on_resize != nil) {
+            if origamiWindow.callbacks.on_resize != nil {
                 origamiWindow.callbacks.on_resize(origamiWindow, width, height)
             }
 
@@ -78,7 +78,7 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32) -> (^Window
 
     hWnd := win32.CreateWindowW(wc.lpszClassName, &utf16_title[0], win32.WS_OVERLAPPEDWINDOW, x, y, width, height, nil, nil, wc.hInstance, nil)
 
-    if (hWnd == nil) {
+    if hWnd == nil {
         return window, .Failed
     }
 
