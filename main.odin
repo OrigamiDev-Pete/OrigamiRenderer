@@ -37,8 +37,8 @@ run :: proc() -> int {
     setup_window_callbacks(window)
 
 	renderer: or.Renderer = {}
-	or.init_renderer(&renderer)
 	defer or.deinit_renderer(&renderer)
+	if or.init_renderer(&renderer) != .Success do return 1
 
 	for !op.window_should_close(window) {
 

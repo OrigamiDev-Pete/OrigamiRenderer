@@ -8,7 +8,6 @@ import "core:runtime"
 import "core:strings"
 import vk "vendor:vulkan"
 
-
 validation_layers :: []cstring {
     "VK_LAYER_KHRONOS_validation"
 }
@@ -21,22 +20,35 @@ when ODIN_DEBUG {
 
 Vulkan_Properties :: struct {
     instance: vk.Instance,
+    physical_device: vk.PhysicalDevice,
     debug_messenger: vk.DebugUtilsMessengerEXT,
 }
 
-_vk_init_renderer :: proc(r: ^Renderer) {
+Queue_Family_Indices :: struct {
+    graphics_family: Maybe(int)
+}
+
+_vk_init_renderer :: proc(r: ^Renderer) -> (err: Error) {
     // Get global vulkan procedures
     get_instance_proc_address := load_vkGetInstanceProcAddr()
     vk.load_proc_addresses(get_instance_proc_address)
 
-    err := create_instance(r)
+    create_instance(r) or_return
     // Get instance procedures
     vk.load_proc_addresses(r.vk.instance)
+
+    pick_physical_device(r) or_return
+
     setup_debug_messenger(r)
+
+    return
 }
 
-set_proc_address :: proc(p: rawptr) {
-
+_vk_deinit_renderer :: proc(r: ^Renderer) {
+    if enable_validation_layers {
+        vk.DestroyDebugUtilsMessengerEXT(r.vk.instance, r.vk.debug_messenger, nil)
+    }
+    vk.DestroyInstance(r.vk.instance, nil)
 }
 
 load_vkGetInstanceProcAddr :: proc() -> rawptr {
@@ -169,15 +181,61 @@ check_validation_layer_support :: proc() -> bool {
     return true
 }
 
-_vk_render :: proc(r: ^Renderer) {
+pick_physical_device :: proc(r: ^Renderer) -> (err: Error) {
+    device_count: u32
+    vk.EnumeratePhysicalDevices(r.vk.instance, &device_count, nil)
+    if device_count == 0 {
+        log.error("Could not find GPUs with Vulkan support.")
+        return .Cannot_Find_Vulkan_Device
+    }
 
+    devices := make([]vk.PhysicalDevice, device_count)
+    defer delete(devices)
+    vk.EnumeratePhysicalDevices(r.vk.instance, &device_count, raw_data(devices))
+
+    for device in &devices {
+        if is_device_suitable(device) {
+            r.vk.physical_device = device
+            break
+        }
+    }
+
+    if r.vk.physical_device == nil {
+        log.error("Failed to find a suitable GPU.")
+        return .Cannot_Find_Vulkan_Device
+    }
+
+    return
 }
 
-_vk_deinit_renderer :: proc(r: ^Renderer) {
-    if (enable_validation_layers) {
-        // vk.DestroyDebugUtilsMessengerEXT(r.vk.instance, r.vk.debug_messenger, nil)
+is_device_suitable :: proc(device: vk.PhysicalDevice) -> bool {
+    indices := find_queue_families(device)
+    value, ok := indices.graphics_family.?
+    return ok
+}
+
+find_queue_families :: proc(device: vk.PhysicalDevice) -> Queue_Family_Indices {
+    indices: Queue_Family_Indices
+
+    queue_family_count: u32
+    vk.GetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, nil)
+    queue_families := make([]vk.QueueFamilyProperties, queue_family_count)
+    defer delete(queue_families)
+    vk.GetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, raw_data(queue_families))
+    for queue_family, i in &queue_families {
+        if .GRAPHICS in queue_family.queueFlags {
+            indices.graphics_family = i
+            break
+        }
     }
-    vk.DestroyInstance(r.vk.instance, nil)
+
+    return indices
+}
+
+
+
+_vk_render :: proc(r: ^Renderer) {
+
 }
 
 setup_debug_messenger :: proc(r: ^Renderer) -> (err: Error) {
@@ -194,12 +252,7 @@ setup_debug_messenger :: proc(r: ^Renderer) -> (err: Error) {
 }
 
 debug_callback :: proc "system" (messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT, messageTypes: vk.DebugUtilsMessageTypeFlagsEXT, pCallbackData: ^vk.DebugUtilsMessengerCallbackDataEXT, pUserData: rawptr) -> b32 {
-    context = {}
-    if pUserData != nil {
-        context = (cast(^runtime.Context) pUserData)^
-    } else {
-        context.logger = log.create_console_logger()
-    }
+    context = ctx^
 
     if .ERROR in messageSeverity {
         log.errorf("Validation layer: %s", pCallbackData.pMessage)
@@ -213,10 +266,9 @@ debug_callback :: proc "system" (messageSeverity: vk.DebugUtilsMessageSeverityFl
 }
 
 init_debug_messenger_create_info :: proc(info: ^vk.DebugUtilsMessengerCreateInfoEXT) {
-    ctx := context
     info.sType = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT
-    info.messageSeverity = { .VERBOSE, .INFO, .WARNING, .ERROR }
+    info.messageSeverity = { .WARNING, .ERROR }
     info.messageType = { .GENERAL, .VALIDATION, .PERFORMANCE }
     info.pfnUserCallback = debug_callback
-    info.pUserData = &ctx
+    // info.pUserData = ctx
 }
