@@ -16,6 +16,11 @@ Window_Base :: struct {
     odin_context: ^runtime.Context,
 }
 
+Win32_Window :: struct {
+    using base: Window_Base,
+    window_handle: rawptr,
+}
+
 Window :: union {
     Win32_Window,
 }

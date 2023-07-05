@@ -7,6 +7,7 @@ import "core:os"
 import "core:runtime"
 import "core:strings"
 import vk "vendor:vulkan"
+import win32 "core:sys/windows"
 
 validation_layers :: []cstring {
     "VK_LAYER_KHRONOS_validation"
@@ -24,6 +25,8 @@ Vulkan_Renderer :: struct {
     physical_device: vk.PhysicalDevice,
     device: vk.Device,
     graphics_queue: vk.Queue,
+    present_queue: vk.Queue,
+    surface: vk.SurfaceKHR,
     debug_messenger: vk.DebugUtilsMessengerEXT,
 }
 
@@ -34,13 +37,15 @@ Vulkan_Error :: enum {
     Cannot_Create_Debug_Messenger,
     Cannot_Find_Vulkan_Device,
     Cannot_Create_Logical_Device,
+    Cannot_Create_Surface,
 }
 
 Queue_Family_Indices :: struct {
-    graphics_family: Maybe(u32)
+    graphics_family: Maybe(u32),
+    present_family: Maybe(u32)
 }
 
-_vk_init_renderer :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
+_vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Error) {
     // Get global vulkan procedures
     get_instance_proc_address := load_vkGetInstanceProcAddr()
     vk.load_proc_addresses(get_instance_proc_address)
@@ -49,20 +54,22 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
     // Get instance procedures
     vk.load_proc_addresses(r.instance)
 
+    setup_debug_messenger(r)
+    create_surface(r, window_info) or_return
     pick_physical_device(r) or_return
     create_logical_device(r) or_return
 
-    setup_debug_messenger(r)
 
     return
 }
 
-_vk_deinit_renderer :: proc(r: ^Vulkan_Renderer) {
+_vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
     if enable_validation_layers {
-        vk.DestroyDebugUtilsMessengerEXT(r.instance, r.debug_messenger, nil)
+        vk.DestroyDebugUtilsMessengerEXT(instance, debug_messenger, nil)
     }
-    vk.DestroyDevice(r.device, nil)
-    vk.DestroyInstance(r.instance, nil)
+    vk.DestroyDevice(device, nil)
+    vk.DestroySurfaceKHR(instance, surface, nil)
+    vk.DestroyInstance(instance, nil)
 }
 
 load_vkGetInstanceProcAddr :: proc() -> rawptr {
@@ -195,6 +202,24 @@ check_validation_layer_support :: proc() -> bool {
     return true
 }
 
+create_surface :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Error) {
+    when ODIN_OS == .Windows {
+        using win32
+        create_info := vk.Win32SurfaceCreateInfoKHR {
+            sType = .WIN32_SURFACE_CREATE_INFO_KHR,
+            hwnd = cast(HWND) window_info.(Win32_Window_Info).hwnd,
+            hinstance = cast(HANDLE) GetModuleHandleA(nil)
+        }
+
+        if vk.CreateWin32SurfaceKHR(r.instance, &create_info, nil, &r.surface) != .SUCCESS {
+            log.error("Could not create window surface.")
+            return .Cannot_Create_Surface
+        }
+    }
+
+    return
+}
+
 pick_physical_device :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
     device_count: u32
     vk.EnumeratePhysicalDevices(r.instance, &device_count, nil)
@@ -208,7 +233,7 @@ pick_physical_device :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
     vk.EnumeratePhysicalDevices(r.instance, &device_count, raw_data(devices))
 
     for device in &devices {
-        if is_device_suitable(device) {
+        if is_device_suitable(r, device) {
             r.physical_device = device
             break
         }
@@ -222,23 +247,33 @@ pick_physical_device :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
     return
 }
 
-is_device_suitable :: proc(device: vk.PhysicalDevice) -> bool {
-    indices := find_queue_families(device)
+is_device_suitable :: proc(r: ^Vulkan_Renderer, device: vk.PhysicalDevice) -> bool {
+    indices := find_queue_families(r, device)
     value, ok := indices.graphics_family.?
     return ok
 }
 
-find_queue_families :: proc(device: vk.PhysicalDevice) -> Queue_Family_Indices {
+find_queue_families :: proc(r: ^Vulkan_Renderer, device: vk.PhysicalDevice) -> Queue_Family_Indices {
     indices: Queue_Family_Indices
 
     queue_family_count: u32
     vk.GetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, nil)
     queue_families := make([]vk.QueueFamilyProperties, queue_family_count)
     defer delete(queue_families)
+
     vk.GetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, raw_data(queue_families))
     for queue_family, i in &queue_families {
         if .GRAPHICS in queue_family.queueFlags {
             indices.graphics_family = u32(i)
+        }
+
+        present_support : b32 = false
+        vk.GetPhysicalDeviceSurfaceSupportKHR(device, u32(i), r.surface, &present_support)
+        if present_support {
+            indices.present_family = u32(i)
+        }
+
+        if queue_family_complete(indices) {
             break
         }
     }
@@ -247,22 +282,33 @@ find_queue_families :: proc(device: vk.PhysicalDevice) -> Queue_Family_Indices {
 }
 
 create_logical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
-    indices := find_queue_families(r.physical_device)
-    queue_create_info := vk.DeviceQueueCreateInfo {
-        sType = .DEVICE_QUEUE_CREATE_INFO,
-        queueFamilyIndex = indices.graphics_family.?,
-        queueCount = 1
-    }
+    indices := find_queue_families(r, r.physical_device)
+
+    unique_queue_families := make(map[u32]struct{}, 0, context.temp_allocator)
+    unique_queue_families[indices.graphics_family.?] = {}
+    unique_queue_families[indices.present_family.?] = {}
+    queue_create_infos := make([]vk.DeviceQueueCreateInfo, len(unique_queue_families), context.temp_allocator)
+    defer free_all(context.temp_allocator)
 
     queue_priority : f32 = 1.0
-    queue_create_info.pQueuePriorities = &queue_priority
+    i := 0
+    for queue_family, _ in unique_queue_families {
+        queue_create_info := vk.DeviceQueueCreateInfo {
+            sType = .DEVICE_QUEUE_CREATE_INFO,
+            queueFamilyIndex = queue_family,
+            queueCount = cast(u32) len(queue_create_infos),
+            pQueuePriorities = &queue_priority
+        }
+        queue_create_infos[i] = queue_create_info
+        i += 1
+    }
 
     device_features: vk.PhysicalDeviceFeatures
 
     create_info := vk.DeviceCreateInfo {
         sType = .DEVICE_CREATE_INFO,
         queueCreateInfoCount = 1,
-        pQueueCreateInfos = &queue_create_info,
+        pQueueCreateInfos = raw_data(queue_create_infos),
         pEnabledFeatures = &device_features
     }
 
@@ -272,10 +318,12 @@ create_logical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     }
 
     if vk.CreateDevice(r.physical_device, &create_info, nil, &r.device) != .SUCCESS {
+        log.error("Failed to create logical device.")
         return .Cannot_Create_Logical_Device
     }
 
     vk.GetDeviceQueue(r.device, indices.graphics_family.?, 0, &r.graphics_queue)
+    vk.GetDeviceQueue(r.device, indices.present_family.?, 0, &r.present_queue)
     
     return
 }
@@ -292,6 +340,7 @@ setup_debug_messenger :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
     init_debug_messenger_create_info(&create_info)
 
     if vk.CreateDebugUtilsMessengerEXT(r.instance, &create_info, nil, &r.debug_messenger) != .SUCCESS {
+        log.error("Failed to create debug messenger.")
         return .Cannot_Create_Debug_Messenger
     }
 
@@ -318,4 +367,10 @@ init_debug_messenger_create_info :: proc(info: ^vk.DebugUtilsMessengerCreateInfo
     info.messageType = { .GENERAL, .VALIDATION, .PERFORMANCE }
     info.pfnUserCallback = debug_callback
     // info.pUserData = ctx
+}
+
+queue_family_complete :: proc(queue_family: Queue_Family_Indices) -> bool {
+    _, ok1 := queue_family.graphics_family.?
+    _, ok2 := queue_family.present_family.?
+    return ok1 && ok2
 }

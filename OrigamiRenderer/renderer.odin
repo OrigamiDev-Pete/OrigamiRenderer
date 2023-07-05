@@ -5,11 +5,19 @@ import vk "vendor:vulkan"
 
 @(private)
 Renderer_Base :: struct {
-    
+    window_info: Window_Info
 }
 
 Renderer :: union {
     Vulkan_Renderer,
+}
+
+Window_Info :: union {
+    Win32_Window_Info,
+}
+
+Win32_Window_Info :: struct {
+    hwnd: rawptr,
 }
 
 Render_API :: enum {
@@ -41,11 +49,11 @@ set_render_api :: proc(api: Render_API) {
     render_api = api
 }
 
-init_renderer :: proc(renderer: ^Renderer) -> (err: Error) {
+init_renderer :: proc(renderer: ^Renderer, window_info: Window_Info) -> (err: Error) {
     ctx = new_clone(context)
     switch render_api {
         case .Vulkan:
-            return _vk_init_renderer(auto_cast renderer)
+            return _vk_init_renderer(auto_cast renderer, window_info)
     }
     return
 }

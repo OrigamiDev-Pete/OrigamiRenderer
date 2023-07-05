@@ -7,11 +7,6 @@ import "core:runtime"
 import "core:unicode/utf16"
 import win32 "core:sys/windows"
 
-Win32_Window :: struct {
-    using base: Window_Base,
-    window_handle: rawptr,
-}
-
 origamiWindow: ^Win32_Window = nil
 
 CLASS_NAME :: "Origami Window Class"
@@ -88,7 +83,7 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32) -> (^Window
         return auto_cast window, .Failed
     }
 
-    w := window.(Win32_Window)
+    w := &window.(Win32_Window)
     w.window_handle = hWnd
 
     win32.ShowWindow(hWnd, win32.SW_SHOWDEFAULT)

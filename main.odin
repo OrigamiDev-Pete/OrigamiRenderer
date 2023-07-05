@@ -38,7 +38,7 @@ run :: proc() -> int {
 
 	renderer: or.Renderer = {}
 	defer or.deinit_renderer(&renderer)
-	if or.init_renderer(&renderer) != nil do return 1
+	if or.init_renderer(&renderer, get_platform_window_info(window^)) != nil do return 1
 
 	for !op.window_should_close(window) {
 
@@ -57,4 +57,13 @@ setup_window_callbacks :: proc(window: ^op.Window) {
 	op.window_set_on_close_callback(window, proc(window: ^op.Window) {
 		log.debug("Window closed")
 	})
+}
+
+get_platform_window_info :: proc(window: op.Window) -> (info: or.Window_Info) {
+	when ODIN_OS == .Windows {
+		win32_info: or.Win32_Window_Info
+		win32_info.hwnd = window.(op.Win32_Window).window_handle
+		info = win32_info
+		return
+	}
 }
