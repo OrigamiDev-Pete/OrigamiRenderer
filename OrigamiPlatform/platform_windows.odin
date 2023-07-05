@@ -7,7 +7,12 @@ import "core:runtime"
 import "core:unicode/utf16"
 import win32 "core:sys/windows"
 
-origamiWindow: ^Window = nil
+Win32_Window :: struct {
+    using base: Window_Base,
+    window_handle: rawptr,
+}
+
+origamiWindow: ^Win32_Window = nil
 
 CLASS_NAME :: "Origami Window Class"
 
@@ -22,7 +27,7 @@ window_proc :: proc "stdcall" (hWnd: win32.HWND, msg: win32.UINT, wParam: win32.
             width := win32.LOWORD(cast(win32.DWORD)lParam)
             height := win32.HIWORD(cast(win32.DWORD)lParam)
             if origamiWindow.callbacks.on_resize != nil {
-                origamiWindow.callbacks.on_resize(origamiWindow, width, height)
+                origamiWindow.callbacks.on_resize(cast(^Window) origamiWindow, width, height)
             }
 
             return 0
@@ -31,7 +36,7 @@ window_proc :: proc "stdcall" (hWnd: win32.HWND, msg: win32.UINT, wParam: win32.
             when ODIN_DEBUG {
                 fmt.println("WM_CLOSE")
             }
-            if origamiWindow.callbacks.on_close != nil do origamiWindow.callbacks.on_close(origamiWindow)
+            if origamiWindow.callbacks.on_close != nil do origamiWindow.callbacks.on_close(cast(^Window) origamiWindow)
             win32.DestroyWindow(hWnd)
             return 0
         }
@@ -65,7 +70,8 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32) -> (^Window
     utf16.encode_string(utf16_title[:], title) 
 
     ctx := new_clone(context)
-    window := new_clone(Window {
+    window := new(Window)
+    window^ = Win32_Window {
         width = width,
         height = height,
         title = title,
@@ -73,28 +79,29 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32) -> (^Window
         y = y,
         callbacks = {},
         odin_context = ctx,
-    })
-    origamiWindow = window
+    }
+    origamiWindow = auto_cast window
 
     hWnd := win32.CreateWindowW(wc.lpszClassName, &utf16_title[0], win32.WS_OVERLAPPEDWINDOW, x, y, width, height, nil, nil, wc.hInstance, nil)
 
     if hWnd == nil {
-        return window, .Failed
+        return auto_cast window, .Failed
     }
 
-    window.win32_handle = hWnd
+    w := window.(Win32_Window)
+    w.window_handle = hWnd
 
     win32.ShowWindow(hWnd, win32.SW_SHOWDEFAULT)
 
-    return window, .None
+    return auto_cast window, .None
 }
 
-_destroy_window :: proc(window: ^Window) {
+_destroy_window :: proc(window: ^Win32_Window) {
     free(window.odin_context)
     free(window)
 }
 
-_window_should_close :: proc(window: ^Window) -> bool {
+_window_should_close :: proc(window: ^Win32_Window) -> bool {
     should_quit := false
     msg: win32.MSG
     for win32.PeekMessageW(&msg, nil, 0, 0, win32.PM_REMOVE) {

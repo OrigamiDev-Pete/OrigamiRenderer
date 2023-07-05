@@ -1,19 +1,23 @@
 package OrigamiPlatform
 
 import "core:runtime"
+import "core:fmt"
 
-Window :: struct {
+// @(private)
+@(private)
+Window_Base :: struct {
     x:      i32,
     y:      i32,
     width:  i32,
     height: i32,
     title:  string,
 
-    callbacks: Window_Callbacks,
+    using callbacks: Window_Callbacks,
     odin_context: ^runtime.Context,
+}
 
-    // Platform Specific
-    win32_handle: rawptr,
+Window :: union {
+    Win32_Window,
 }
 
 @(private)
@@ -34,17 +38,23 @@ create_window :: proc(width, height: i32, title: string, x: i32 = 0, y: i32 = 0)
 }
 
 destroy_window :: proc(window: ^Window) {
-    _destroy_window(window)
+    _destroy_window(auto_cast window)
 }
 
 window_should_close :: proc(window: ^Window) -> bool {
-    return _window_should_close(window)
+    return _window_should_close(auto_cast window)
 }
 
 window_set_on_resize_callback :: proc(window: ^Window, callback: #type proc(window: ^Window, width, height: u16)) {
-    window.callbacks.on_resize = callback
+    switch w in window {
+        case Win32_Window:
+            w.on_resize = callback
+    }
 }
 
 window_set_on_close_callback :: proc(window: ^Window, callback: #type proc(window: ^Window)) {
-    window.callbacks.on_close = callback
+    switch w in window {
+        case Win32_Window:
+            w.on_close = callback
+    }
 }

@@ -3,8 +3,13 @@ package OrigamiRenderer
 import "core:runtime"
 import vk "vendor:vulkan"
 
-Renderer :: struct {
-    vk: Vulkan_Properties,
+@(private)
+Renderer_Base :: struct {
+    
+}
+
+Renderer :: union {
+    Vulkan_Renderer,
 }
 
 Render_API :: enum {
@@ -17,14 +22,13 @@ Render_API :: enum {
     // WGPU,
 }
 
-Error :: enum {
-    Success,
-    // Vulkan
-    Cannot_Create_Instance,
-    Validation_Layer_Not_Supported,
-    Cannot_Create_Debug_Messenger,
-    Cannot_Find_Vulkan_Device,
+Renderer_Error :: enum {
+    None,
+}
 
+Error :: union #shared_nil {
+    Renderer_Error,
+    Vulkan_Error,
 }
 
 @(private)
@@ -41,7 +45,7 @@ init_renderer :: proc(renderer: ^Renderer) -> (err: Error) {
     ctx = new_clone(context)
     switch render_api {
         case .Vulkan:
-            return _vk_init_renderer(renderer)
+            return _vk_init_renderer(auto_cast renderer)
     }
     return
 }
@@ -49,7 +53,7 @@ init_renderer :: proc(renderer: ^Renderer) -> (err: Error) {
 render :: proc(renderer: ^Renderer) {
     switch render_api {
         case .Vulkan:
-            _vk_render(renderer)
+            _vk_render(auto_cast renderer)
     }
 }
 
@@ -57,6 +61,6 @@ deinit_renderer :: proc(renderer: ^Renderer) {
     defer free(ctx)
     switch render_api {
         case .Vulkan:
-            _vk_deinit_renderer(renderer)
+            _vk_deinit_renderer(auto_cast renderer)
     }
 }

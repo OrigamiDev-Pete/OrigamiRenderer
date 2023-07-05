@@ -38,7 +38,7 @@ run :: proc() -> int {
 
 	renderer: or.Renderer = {}
 	defer or.deinit_renderer(&renderer)
-	if or.init_renderer(&renderer) != .Success do return 1
+	if or.init_renderer(&renderer) != nil do return 1
 
 	for !op.window_should_close(window) {
 

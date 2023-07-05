@@ -18,24 +18,33 @@ when ODIN_DEBUG {
     enable_validation_layers :: false
 }
 
-Vulkan_Properties :: struct {
+Vulkan_Renderer :: struct {
+    using base: Renderer_Base,
     instance: vk.Instance,
     physical_device: vk.PhysicalDevice,
     debug_messenger: vk.DebugUtilsMessengerEXT,
+}
+
+Vulkan_Error :: enum {
+    None,
+    Cannot_Create_Instance,
+    Validation_Layer_Not_Supported,
+    Cannot_Create_Debug_Messenger,
+    Cannot_Find_Vulkan_Device,
 }
 
 Queue_Family_Indices :: struct {
     graphics_family: Maybe(int)
 }
 
-_vk_init_renderer :: proc(r: ^Renderer) -> (err: Error) {
+_vk_init_renderer :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
     // Get global vulkan procedures
     get_instance_proc_address := load_vkGetInstanceProcAddr()
     vk.load_proc_addresses(get_instance_proc_address)
 
     create_instance(r) or_return
     // Get instance procedures
-    vk.load_proc_addresses(r.vk.instance)
+    vk.load_proc_addresses(r.instance)
 
     pick_physical_device(r) or_return
 
@@ -44,11 +53,11 @@ _vk_init_renderer :: proc(r: ^Renderer) -> (err: Error) {
     return
 }
 
-_vk_deinit_renderer :: proc(r: ^Renderer) {
+_vk_deinit_renderer :: proc(r: ^Vulkan_Renderer) {
     if enable_validation_layers {
-        vk.DestroyDebugUtilsMessengerEXT(r.vk.instance, r.vk.debug_messenger, nil)
+        vk.DestroyDebugUtilsMessengerEXT(r.instance, r.debug_messenger, nil)
     }
-    vk.DestroyInstance(r.vk.instance, nil)
+    vk.DestroyInstance(r.instance, nil)
 }
 
 load_vkGetInstanceProcAddr :: proc() -> rawptr {
@@ -69,7 +78,7 @@ load_vkGetInstanceProcAddr :: proc() -> rawptr {
     return proc_address
 }
 
-create_instance :: proc(r: ^Renderer) -> (err: Error) {
+create_instance :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
     if enable_validation_layers && !check_validation_layer_support() {
         log.error("Validation layers requested, but not available")
         return .Validation_Layer_Not_Supported
@@ -111,7 +120,7 @@ create_instance :: proc(r: ^Renderer) -> (err: Error) {
     create_info.enabledExtensionCount = cast(u32) len(required_extensions)
     create_info.ppEnabledExtensionNames = raw_data(required_extensions)
 
-    if vk.CreateInstance(&create_info, nil, &r.vk.instance) != .SUCCESS {
+    if vk.CreateInstance(&create_info, nil, &r.instance) != .SUCCESS {
         log.error("Failed to create instance.")
         return .Cannot_Create_Instance
     }
@@ -181,9 +190,9 @@ check_validation_layer_support :: proc() -> bool {
     return true
 }
 
-pick_physical_device :: proc(r: ^Renderer) -> (err: Error) {
+pick_physical_device :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
     device_count: u32
-    vk.EnumeratePhysicalDevices(r.vk.instance, &device_count, nil)
+    vk.EnumeratePhysicalDevices(r.instance, &device_count, nil)
     if device_count == 0 {
         log.error("Could not find GPUs with Vulkan support.")
         return .Cannot_Find_Vulkan_Device
@@ -191,16 +200,16 @@ pick_physical_device :: proc(r: ^Renderer) -> (err: Error) {
 
     devices := make([]vk.PhysicalDevice, device_count)
     defer delete(devices)
-    vk.EnumeratePhysicalDevices(r.vk.instance, &device_count, raw_data(devices))
+    vk.EnumeratePhysicalDevices(r.instance, &device_count, raw_data(devices))
 
     for device in &devices {
         if is_device_suitable(device) {
-            r.vk.physical_device = device
+            r.physical_device = device
             break
         }
     }
 
-    if r.vk.physical_device == nil {
+    if r.physical_device == nil {
         log.error("Failed to find a suitable GPU.")
         return .Cannot_Find_Vulkan_Device
     }
@@ -234,17 +243,17 @@ find_queue_families :: proc(device: vk.PhysicalDevice) -> Queue_Family_Indices {
 
 
 
-_vk_render :: proc(r: ^Renderer) {
+_vk_render :: proc(r: ^Vulkan_Renderer) {
 
 }
 
-setup_debug_messenger :: proc(r: ^Renderer) -> (err: Error) {
+setup_debug_messenger :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
     if !enable_validation_layers do return
 
     create_info: vk.DebugUtilsMessengerCreateInfoEXT
     init_debug_messenger_create_info(&create_info)
 
-    if vk.CreateDebugUtilsMessengerEXT(r.vk.instance, &create_info, nil, &r.vk.debug_messenger) != .SUCCESS {
+    if vk.CreateDebugUtilsMessengerEXT(r.instance, &create_info, nil, &r.debug_messenger) != .SUCCESS {
         return .Cannot_Create_Debug_Messenger
     }
 
