@@ -22,6 +22,8 @@ Vulkan_Renderer :: struct {
     using base: Renderer_Base,
     instance: vk.Instance,
     physical_device: vk.PhysicalDevice,
+    device: vk.Device,
+    graphics_queue: vk.Queue,
     debug_messenger: vk.DebugUtilsMessengerEXT,
 }
 
@@ -31,10 +33,11 @@ Vulkan_Error :: enum {
     Validation_Layer_Not_Supported,
     Cannot_Create_Debug_Messenger,
     Cannot_Find_Vulkan_Device,
+    Cannot_Create_Logical_Device,
 }
 
 Queue_Family_Indices :: struct {
-    graphics_family: Maybe(int)
+    graphics_family: Maybe(u32)
 }
 
 _vk_init_renderer :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
@@ -47,6 +50,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
     vk.load_proc_addresses(r.instance)
 
     pick_physical_device(r) or_return
+    create_logical_device(r) or_return
 
     setup_debug_messenger(r)
 
@@ -57,6 +61,7 @@ _vk_deinit_renderer :: proc(r: ^Vulkan_Renderer) {
     if enable_validation_layers {
         vk.DestroyDebugUtilsMessengerEXT(r.instance, r.debug_messenger, nil)
     }
+    vk.DestroyDevice(r.device, nil)
     vk.DestroyInstance(r.instance, nil)
 }
 
@@ -233,7 +238,7 @@ find_queue_families :: proc(device: vk.PhysicalDevice) -> Queue_Family_Indices {
     vk.GetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, raw_data(queue_families))
     for queue_family, i in &queue_families {
         if .GRAPHICS in queue_family.queueFlags {
-            indices.graphics_family = i
+            indices.graphics_family = u32(i)
             break
         }
     }
@@ -241,6 +246,39 @@ find_queue_families :: proc(device: vk.PhysicalDevice) -> Queue_Family_Indices {
     return indices
 }
 
+create_logical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    indices := find_queue_families(r.physical_device)
+    queue_create_info := vk.DeviceQueueCreateInfo {
+        sType = .DEVICE_QUEUE_CREATE_INFO,
+        queueFamilyIndex = indices.graphics_family.?,
+        queueCount = 1
+    }
+
+    queue_priority : f32 = 1.0
+    queue_create_info.pQueuePriorities = &queue_priority
+
+    device_features: vk.PhysicalDeviceFeatures
+
+    create_info := vk.DeviceCreateInfo {
+        sType = .DEVICE_CREATE_INFO,
+        queueCreateInfoCount = 1,
+        pQueueCreateInfos = &queue_create_info,
+        pEnabledFeatures = &device_features
+    }
+
+    if enable_validation_layers {
+        create_info.enabledLayerCount = cast(u32) len(validation_layers)
+        create_info.ppEnabledLayerNames = raw_data(validation_layers)
+    }
+
+    if vk.CreateDevice(r.physical_device, &create_info, nil, &r.device) != .SUCCESS {
+        return .Cannot_Create_Logical_Device
+    }
+
+    vk.GetDeviceQueue(r.device, indices.graphics_family.?, 0, &r.graphics_queue)
+    
+    return
+}
 
 
 _vk_render :: proc(r: ^Vulkan_Renderer) {
