@@ -2,10 +2,11 @@ package OrigamiRenderer
 
 import "core:runtime"
 import vk "vendor:vulkan"
+import win32 "core:sys/windows"
 
 @(private)
 Renderer_Base :: struct {
-    window_info: Window_Info
+    window_info: Window_Info,
 }
 
 Renderer :: union {
@@ -16,8 +17,15 @@ Window_Info :: union {
     Win32_Window_Info,
 }
 
+@(private)
+Window_Info_Base :: struct {
+    width: int,
+    height: int,
+}
+
 Win32_Window_Info :: struct {
-    hwnd: rawptr,
+    using base: Window_Info_Base,
+    hwnd: win32.HWND,
 }
 
 Render_API :: enum {

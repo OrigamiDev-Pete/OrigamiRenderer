@@ -106,3 +106,10 @@ _window_should_close :: proc(window: ^Win32_Window) -> bool {
     }
     return cast(bool) should_quit
 }
+
+_get_window_size :: proc(window: Win32_Window) -> (int, int) {
+    rect: win32.RECT
+    win32.GetClientRect(window.window_handle, &rect)
+
+    return  int(rect.right), int(rect.bottom)
+}

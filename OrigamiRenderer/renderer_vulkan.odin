@@ -10,7 +10,11 @@ import vk "vendor:vulkan"
 import win32 "core:sys/windows"
 
 validation_layers :: []cstring {
-    "VK_LAYER_KHRONOS_validation"
+    "VK_LAYER_KHRONOS_validation",
+}
+
+device_extensions :: []cstring {
+    vk.KHR_SWAPCHAIN_EXTENSION_NAME,
 }
 
 when ODIN_DEBUG {
@@ -27,6 +31,10 @@ Vulkan_Renderer :: struct {
     graphics_queue: vk.Queue,
     present_queue: vk.Queue,
     surface: vk.SurfaceKHR,
+    swap_chain: vk.SwapchainKHR,
+    swap_chain_images: []vk.Image,
+    swap_chain_image_format: vk.Format,
+    swap_chain_extent: vk.Extent2D,
     debug_messenger: vk.DebugUtilsMessengerEXT,
 }
 
@@ -38,11 +46,18 @@ Vulkan_Error :: enum {
     Cannot_Find_Vulkan_Device,
     Cannot_Create_Logical_Device,
     Cannot_Create_Surface,
+    Cannot_Create_Swap_Chain,
 }
 
 Queue_Family_Indices :: struct {
     graphics_family: Maybe(u32),
-    present_family: Maybe(u32)
+    present_family: Maybe(u32),
+}
+
+Swap_Chain_Support_Details :: struct {
+    capabilites: vk.SurfaceCapabilitiesKHR,
+    formats: []vk.SurfaceFormatKHR,
+    present_modes: []vk.PresentModeKHR,
 }
 
 _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Error) {
@@ -58,6 +73,10 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     create_surface(r, window_info) or_return
     pick_physical_device(r) or_return
     create_logical_device(r) or_return
+    create_swap_chain(r, window_info)
+
+    log.debug(r.swap_chain_extent)
+    log.debug(r.swap_chain_image_format)
 
 
     return
@@ -67,9 +86,12 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
     if enable_validation_layers {
         vk.DestroyDebugUtilsMessengerEXT(instance, debug_messenger, nil)
     }
+    vk.DestroySwapchainKHR(device, swap_chain, nil)
     vk.DestroyDevice(device, nil)
     vk.DestroySurfaceKHR(instance, surface, nil)
     vk.DestroyInstance(instance, nil)
+
+    delete(r.swap_chain_images)
 }
 
 load_vkGetInstanceProcAddr :: proc() -> rawptr {
@@ -102,12 +124,12 @@ create_instance :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
         applicationVersion = vk.MAKE_VERSION(1, 0, 0),
         pEngineName = "Origami",
         engineVersion = vk.MAKE_VERSION(1, 0, 0),
-        apiVersion = vk.API_VERSION_1_0
+        apiVersion = vk.API_VERSION_1_0,
     }
 
     create_info : vk.InstanceCreateInfo = {
         sType = .INSTANCE_CREATE_INFO,
-        pApplicationInfo = &app_info
+        pApplicationInfo = &app_info,
     }
 
     debug_create_info: vk.DebugUtilsMessengerCreateInfoEXT
@@ -173,12 +195,100 @@ get_required_extensions :: proc() -> [dynamic]cstring {
     return extensions
 }
 
+create_surface :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Error) {
+    when ODIN_OS == .Windows {
+        using win32
+        create_info := vk.Win32SurfaceCreateInfoKHR {
+            sType = .WIN32_SURFACE_CREATE_INFO_KHR,
+            hwnd = cast(HWND) window_info.(Win32_Window_Info).hwnd,
+            hinstance = cast(HANDLE) GetModuleHandleA(nil),
+        }
+
+        if vk.CreateWin32SurfaceKHR(r.instance, &create_info, nil, &r.surface) != .SUCCESS {
+            log.error("Could not create window surface.")
+            return .Cannot_Create_Surface
+        }
+    }
+
+
+    return
+}
+
+pick_physical_device :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
+    device_count: u32
+    vk.EnumeratePhysicalDevices(r.instance, &device_count, nil)
+    if device_count == 0 {
+        log.error("Could not find GPUs with Vulkan support.")
+        return .Cannot_Find_Vulkan_Device
+    }
+
+
+    devices := make([]vk.PhysicalDevice, device_count)
+    defer delete(devices)
+    vk.EnumeratePhysicalDevices(r.instance, &device_count, raw_data(devices))
+
+    for device in &devices {
+        if is_device_suitable(r^, device) {
+            r.physical_device = device
+            break
+        }
+    }
+
+    if r.physical_device == nil {
+        log.error("Failed to find a suitable GPU.")
+        return .Cannot_Find_Vulkan_Device
+    }
+
+    return
+}
+
+is_device_suitable :: proc(r: Vulkan_Renderer, device: vk.PhysicalDevice) -> bool {
+    indices := find_queue_families(r, device)
+    indices_complete := queue_family_complete(indices)
+
+    extension_supported := check_device_extension_support(device)
+
+    swap_chains_adequate := false
+    if (extension_supported) {
+        swap_chain_support := query_swap_chain_support(r, device)
+        defer delete_swap_chain_support_details(swap_chain_support)
+        swap_chains_adequate = len(swap_chain_support.formats) != 0 && len(swap_chain_support.present_modes) != 0
+    }
+
+
+    return indices_complete && extension_supported && swap_chains_adequate
+}
+
+check_device_extension_support :: proc(device: vk.PhysicalDevice) -> bool {
+    extensions_count: u32
+    vk.EnumerateDeviceExtensionProperties(device, nil, &extensions_count, nil)
+
+    available_extensions := make([]vk.ExtensionProperties, extensions_count, context.temp_allocator)
+    defer free_all(context.temp_allocator)
+    vk.EnumerateDeviceExtensionProperties(device, nil, &extensions_count, raw_data(available_extensions))
+
+    for extension_name in device_extensions {
+        extension_found := false
+
+        for extension in &available_extensions {
+            if strings.compare(string(extension_name), string(cstring(&extension.extensionName[0]))) == 0 {
+                extension_found = true
+                break
+            }
+        }
+
+        if !extension_found do return false
+    }
+    
+    return true
+}
+
 check_validation_layer_support :: proc() -> bool {
     layer_count: u32
     vk.EnumerateInstanceLayerProperties(&layer_count, nil)
 
-    available_layers := make([]vk.LayerProperties, layer_count)
-    defer delete(available_layers)
+    available_layers := make([]vk.LayerProperties, layer_count, context.temp_allocator)
+    defer free_all(context.temp_allocator)
     vk.EnumerateInstanceLayerProperties(&layer_count, raw_data(available_layers))
 
     // log.debug("Available layers:")
@@ -202,58 +312,7 @@ check_validation_layer_support :: proc() -> bool {
     return true
 }
 
-create_surface :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Error) {
-    when ODIN_OS == .Windows {
-        using win32
-        create_info := vk.Win32SurfaceCreateInfoKHR {
-            sType = .WIN32_SURFACE_CREATE_INFO_KHR,
-            hwnd = cast(HWND) window_info.(Win32_Window_Info).hwnd,
-            hinstance = cast(HANDLE) GetModuleHandleA(nil)
-        }
-
-        if vk.CreateWin32SurfaceKHR(r.instance, &create_info, nil, &r.surface) != .SUCCESS {
-            log.error("Could not create window surface.")
-            return .Cannot_Create_Surface
-        }
-    }
-
-    return
-}
-
-pick_physical_device :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
-    device_count: u32
-    vk.EnumeratePhysicalDevices(r.instance, &device_count, nil)
-    if device_count == 0 {
-        log.error("Could not find GPUs with Vulkan support.")
-        return .Cannot_Find_Vulkan_Device
-    }
-
-    devices := make([]vk.PhysicalDevice, device_count)
-    defer delete(devices)
-    vk.EnumeratePhysicalDevices(r.instance, &device_count, raw_data(devices))
-
-    for device in &devices {
-        if is_device_suitable(r, device) {
-            r.physical_device = device
-            break
-        }
-    }
-
-    if r.physical_device == nil {
-        log.error("Failed to find a suitable GPU.")
-        return .Cannot_Find_Vulkan_Device
-    }
-
-    return
-}
-
-is_device_suitable :: proc(r: ^Vulkan_Renderer, device: vk.PhysicalDevice) -> bool {
-    indices := find_queue_families(r, device)
-    value, ok := indices.graphics_family.?
-    return ok
-}
-
-find_queue_families :: proc(r: ^Vulkan_Renderer, device: vk.PhysicalDevice) -> Queue_Family_Indices {
+find_queue_families :: proc(r: Vulkan_Renderer, device: vk.PhysicalDevice) -> Queue_Family_Indices {
     indices: Queue_Family_Indices
 
     queue_family_count: u32
@@ -281,8 +340,73 @@ find_queue_families :: proc(r: ^Vulkan_Renderer, device: vk.PhysicalDevice) -> Q
     return indices
 }
 
+query_swap_chain_support :: proc(r: Vulkan_Renderer, device: vk.PhysicalDevice) -> Swap_Chain_Support_Details {
+    details: Swap_Chain_Support_Details
+
+    vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(device, r.surface, &details.capabilites)
+
+    format_count: u32
+    vk.GetPhysicalDeviceSurfaceFormatsKHR(device, r.surface, &format_count, nil)
+
+    if format_count != 0 {
+        details.formats = make([]vk.SurfaceFormatKHR, format_count)
+        vk.GetPhysicalDeviceSurfaceFormatsKHR(device, r.surface, &format_count, raw_data(details.formats))
+    }
+
+    present_mode_count: u32
+    vk.GetPhysicalDeviceSurfacePresentModesKHR(device, r.surface, &present_mode_count, nil)
+
+    if present_mode_count != 0 {
+        details.present_modes = make([]vk.PresentModeKHR, present_mode_count)
+        vk.GetPhysicalDeviceSurfacePresentModesKHR(device, r.surface, &present_mode_count, raw_data(details.present_modes))
+    }
+
+    return details
+}
+
+delete_swap_chain_support_details :: proc(details: Swap_Chain_Support_Details) {
+    delete(details.formats)
+    delete(details.present_modes)
+}
+
+choose_swap_chain_surface_format :: proc(available_formats: []vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
+    for available_format in available_formats {
+        if available_format.format == .B8G8R8_SRGB && available_format.colorSpace == .COLORSPACE_SRGB_NONLINEAR {
+            return available_format
+        }
+    }
+
+    return available_formats[0]
+}
+
+choose_swap_chain_present_mode :: proc(available_present_modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
+    for available_present_mode in available_present_modes {
+        if available_present_mode == .MAILBOX {
+            return available_present_mode
+        }
+    }
+
+    return .FIFO
+}
+
+choose_swap_extent :: proc(capabilities: vk.SurfaceCapabilitiesKHR, info: Window_Info) -> vk.Extent2D {
+    if capabilities.currentExtent.width != max(u32) {
+        return capabilities.currentExtent
+    } else {
+        actual_extent := vk.Extent2D {
+            width = u32(info.?.width),
+            height = u32(info.?.height),
+        }
+
+        actual_extent.width = clamp(actual_extent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width)
+        actual_extent.height = clamp(actual_extent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
+        
+        return actual_extent
+    }
+}
+
 create_logical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
-    indices := find_queue_families(r, r.physical_device)
+    indices := find_queue_families(r^, r.physical_device)
 
     unique_queue_families := make(map[u32]struct{}, 0, context.temp_allocator)
     unique_queue_families[indices.graphics_family.?] = {}
@@ -297,7 +421,7 @@ create_logical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
             sType = .DEVICE_QUEUE_CREATE_INFO,
             queueFamilyIndex = queue_family,
             queueCount = cast(u32) len(queue_create_infos),
-            pQueuePriorities = &queue_priority
+            pQueuePriorities = &queue_priority,
         }
         queue_create_infos[i] = queue_create_info
         i += 1
@@ -309,7 +433,9 @@ create_logical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
         sType = .DEVICE_CREATE_INFO,
         queueCreateInfoCount = 1,
         pQueueCreateInfos = raw_data(queue_create_infos),
-        pEnabledFeatures = &device_features
+        pEnabledFeatures = &device_features,
+        enabledExtensionCount = cast(u32) len(device_extensions),
+        ppEnabledExtensionNames = raw_data(device_extensions),
     }
 
     if enable_validation_layers {
@@ -325,6 +451,59 @@ create_logical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     vk.GetDeviceQueue(r.device, indices.graphics_family.?, 0, &r.graphics_queue)
     vk.GetDeviceQueue(r.device, indices.present_family.?, 0, &r.present_queue)
     
+    return
+}
+
+create_swap_chain :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Vulkan_Error) {
+    swap_chain_support := query_swap_chain_support(r^, r.physical_device)
+    defer delete_swap_chain_support_details(swap_chain_support)
+
+    surface_format := choose_swap_chain_surface_format(swap_chain_support.formats)
+    present_mode := choose_swap_chain_present_mode(swap_chain_support.present_modes)
+    extent := choose_swap_extent(swap_chain_support.capabilites, window_info)
+
+    image_count := swap_chain_support.capabilites.minImageCount + 1
+    if swap_chain_support.capabilites.maxImageCount > 0 && image_count > swap_chain_support.capabilites.maxImageCount {
+        image_count = swap_chain_support.capabilites.maxImageCount
+    }
+
+    create_info := vk.SwapchainCreateInfoKHR {
+        sType = .SWAPCHAIN_CREATE_INFO_KHR,
+        surface = r.surface,
+        minImageCount = image_count,
+        imageFormat = surface_format.format,
+        imageColorSpace = surface_format.colorSpace,
+        imageExtent = extent,
+        imageArrayLayers = 1,
+        imageUsage = { .COLOR_ATTACHMENT },
+        preTransform = swap_chain_support.capabilites.currentTransform,
+        compositeAlpha = { .OPAQUE },
+        presentMode = present_mode,
+        clipped = true,
+        oldSwapchain = vk.SwapchainKHR{},
+    }
+
+    indices := find_queue_families(r^, r.physical_device)
+    queue_family_indices := []u32{ indices.graphics_family.?, indices.present_family.? }
+
+    if indices.graphics_family.? != indices.present_family.? {
+        create_info.imageSharingMode = .CONCURRENT
+        create_info.queueFamilyIndexCount = 2
+        create_info.pQueueFamilyIndices = raw_data(queue_family_indices)
+    }
+
+    if vk.CreateSwapchainKHR(r.device, &create_info, nil, &r.swap_chain) != .SUCCESS {
+        log.error("Failed to create swap chain.")
+        return .Cannot_Create_Swap_Chain
+    }
+
+    vk.GetSwapchainImagesKHR(r.device, r.swap_chain, &image_count, nil)
+    r.swap_chain_images = make([]vk.Image, image_count)
+    vk.GetSwapchainImagesKHR(r.device, r.swap_chain, &image_count, raw_data(r.swap_chain_images))
+
+    r.swap_chain_image_format = surface_format.format
+    r.swap_chain_extent = extent
+
     return
 }
 

@@ -1,9 +1,8 @@
 package OrigamiPlatform
 
 import "core:runtime"
-import "core:fmt"
+import win32 "core:sys/windows"
 
-// @(private)
 @(private)
 Window_Base :: struct {
     x:      i32,
@@ -18,7 +17,7 @@ Window_Base :: struct {
 
 Win32_Window :: struct {
     using base: Window_Base,
-    window_handle: rawptr,
+    window_handle: win32.HWND,
 }
 
 Window :: union {
@@ -48,6 +47,10 @@ destroy_window :: proc(window: ^Window) {
 
 window_should_close :: proc(window: ^Window) -> bool {
     return _window_should_close(auto_cast window)
+}
+
+get_window_size :: proc(window: Window) -> (int, int) {
+    return _get_window_size(window.?)
 }
 
 window_set_on_resize_callback :: proc(window: ^Window, callback: #type proc(window: ^Window, width, height: u16)) {

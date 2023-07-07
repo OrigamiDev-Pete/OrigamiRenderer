@@ -63,6 +63,11 @@ get_platform_window_info :: proc(window: op.Window) -> (info: or.Window_Info) {
 	when ODIN_OS == .Windows {
 		win32_info: or.Win32_Window_Info
 		win32_info.hwnd = window.(op.Win32_Window).window_handle
+
+		width, height := op.get_window_size(window)
+		win32_info.width = width
+		win32_info.height = height
+
 		info = win32_info
 		return
 	}
