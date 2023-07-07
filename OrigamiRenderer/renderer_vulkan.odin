@@ -33,6 +33,7 @@ Vulkan_Renderer :: struct {
     surface: vk.SurfaceKHR,
     swap_chain: vk.SwapchainKHR,
     swap_chain_images: []vk.Image,
+    swap_chain_image_views: []vk.ImageView,
     swap_chain_image_format: vk.Format,
     swap_chain_extent: vk.Extent2D,
     debug_messenger: vk.DebugUtilsMessengerEXT,
@@ -47,6 +48,7 @@ Vulkan_Error :: enum {
     Cannot_Create_Logical_Device,
     Cannot_Create_Surface,
     Cannot_Create_Swap_Chain,
+    Cannot_Create_Image_View,
 }
 
 Queue_Family_Indices :: struct {
@@ -60,7 +62,7 @@ Swap_Chain_Support_Details :: struct {
     present_modes: []vk.PresentModeKHR,
 }
 
-_vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Error) {
+_vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Vulkan_Error) {
     // Get global vulkan procedures
     get_instance_proc_address := load_vkGetInstanceProcAddr()
     vk.load_proc_addresses(get_instance_proc_address)
@@ -73,11 +75,8 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     create_surface(r, window_info) or_return
     pick_physical_device(r) or_return
     create_logical_device(r) or_return
-    create_swap_chain(r, window_info)
-
-    log.debug(r.swap_chain_extent)
-    log.debug(r.swap_chain_image_format)
-
+    create_swap_chain(r, window_info) or_return
+    create_image_views(r) or_return
 
     return
 }
@@ -87,11 +86,17 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
         vk.DestroyDebugUtilsMessengerEXT(instance, debug_messenger, nil)
     }
     vk.DestroySwapchainKHR(device, swap_chain, nil)
+    for image_view in swap_chain_image_views {
+        vk.DestroyImageView(device, image_view, nil)
+    }
+
     vk.DestroyDevice(device, nil)
     vk.DestroySurfaceKHR(instance, surface, nil)
     vk.DestroyInstance(instance, nil)
 
+
     delete(r.swap_chain_images)
+    delete(r.swap_chain_image_views)
 }
 
 load_vkGetInstanceProcAddr :: proc() -> rawptr {
@@ -112,7 +117,7 @@ load_vkGetInstanceProcAddr :: proc() -> rawptr {
     return proc_address
 }
 
-create_instance :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
+create_instance :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     if enable_validation_layers && !check_validation_layer_support() {
         log.error("Validation layers requested, but not available")
         return .Validation_Layer_Not_Supported
@@ -195,7 +200,7 @@ get_required_extensions :: proc() -> [dynamic]cstring {
     return extensions
 }
 
-create_surface :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Error) {
+create_surface :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Vulkan_Error) {
     when ODIN_OS == .Windows {
         using win32
         create_info := vk.Win32SurfaceCreateInfoKHR {
@@ -214,7 +219,7 @@ create_surface :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: E
     return
 }
 
-pick_physical_device :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
+pick_physical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     device_count: u32
     vk.EnumeratePhysicalDevices(r.instance, &device_count, nil)
     if device_count == 0 {
@@ -507,12 +512,41 @@ create_swap_chain :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     return
 }
 
+create_image_views :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    r.swap_chain_image_views = make([]vk.ImageView, len(r.swap_chain_images))
+
+    for i in 0..<len(r.swap_chain_images) {
+        create_info := vk.ImageViewCreateInfo {
+            sType = .IMAGE_VIEW_CREATE_INFO,
+            image = r.swap_chain_images[i],
+            viewType = .D2,
+            format = r.swap_chain_image_format,
+        }
+        create_info.components.r = .IDENTITY
+        create_info.components.g = .IDENTITY
+        create_info.components.b = .IDENTITY
+        create_info.components.a = .IDENTITY
+
+        create_info.subresourceRange.aspectMask = { .COLOR }
+        create_info.subresourceRange.baseMipLevel = 0
+        create_info.subresourceRange.levelCount = 1
+        create_info.subresourceRange.baseArrayLayer = 0
+        create_info.subresourceRange.layerCount = 1
+
+        if vk.CreateImageView(r.device, &create_info, nil, &r.swap_chain_image_views[i]) != .SUCCESS {
+            log.error("Failed to create image view")
+            return .Cannot_Create_Image_View
+        }
+    }
+
+    return
+}
 
 _vk_render :: proc(r: ^Vulkan_Renderer) {
 
 }
 
-setup_debug_messenger :: proc(r: ^Vulkan_Renderer) -> (err: Error) {
+setup_debug_messenger :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     if !enable_validation_layers do return
 
     create_info: vk.DebugUtilsMessengerCreateInfoEXT

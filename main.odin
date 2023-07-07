@@ -38,7 +38,10 @@ run :: proc() -> int {
 
 	renderer: or.Renderer = {}
 	defer or.deinit_renderer(&renderer)
-	if or.init_renderer(&renderer, get_platform_window_info(window^)) != nil do return 1
+	if err := or.init_renderer(&renderer, get_platform_window_info(window^)); err != nil {
+		log.error(err)
+		return 1
+	}
 
 	for !op.window_should_close(window) {
 
