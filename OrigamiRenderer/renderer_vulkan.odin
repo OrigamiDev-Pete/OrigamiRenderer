@@ -6,8 +6,9 @@ import "core:log"
 import "core:os"
 import "core:runtime"
 import "core:strings"
-import vk "vendor:vulkan"
 import win32 "core:sys/windows"
+
+import vk "vendor:vulkan"
 
 validation_layers :: []cstring {
     "VK_LAYER_KHRONOS_validation",
@@ -49,6 +50,7 @@ Vulkan_Error :: enum {
     Cannot_Create_Surface,
     Cannot_Create_Swap_Chain,
     Cannot_Create_Image_View,
+    Cannot_Create_Shader_Module,
 }
 
 Queue_Family_Indices :: struct {
@@ -77,6 +79,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     create_logical_device(r) or_return
     create_swap_chain(r, window_info) or_return
     create_image_views(r) or_return
+    create_graphics_pipeline(r^) or_return
 
     return
 }
@@ -538,6 +541,34 @@ create_image_views :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
             return .Cannot_Create_Image_View
         }
     }
+
+    return
+}
+
+create_graphics_pipeline :: proc(r: Vulkan_Renderer) -> (err: Vulkan_Error) {
+    vert_shader_code, ok1 := os.read_entire_file_from_filename("origamiRenderer/shaders/spirv/vert.spv") 
+    frag_shader_code, ok2 := os.read_entire_file_from_filename("origamiRenderer/shaders/spirv/frag.spv")
+
+    vert_shader_module := vk_create_shader_module(r, vert_shader_code) or_return
+    frag_shader_module := vk_create_shader_module(r, frag_shader_code) or_return
+    defer vk.DestroyShaderModule(r.device, vert_shader_module, nil)
+    defer vk.DestroyShaderModule(r.device, frag_shader_module, nil)
+
+    vert_shader_stage_info := vk.PipelineShaderStageCreateInfo {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = { .VERTEX },
+        module = vert_shader_module,
+        pName = "main",
+    }
+
+    frag_shader_stage_info := vk.PipelineShaderStageCreateInfo {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = { .FRAGMENT },
+        module = frag_shader_module,
+        pName = "main",
+    }
+
+    shader_stages := [?]vk.PipelineShaderStageCreateInfo { vert_shader_stage_info, frag_shader_stage_info }
 
     return
 }

@@ -35,7 +35,7 @@ Render_API :: enum {
     // D3D12,
     // Metal,
     // WebGL,
-    // WGPU,
+    // WebGPU,
 }
 
 Renderer_Error :: enum {
