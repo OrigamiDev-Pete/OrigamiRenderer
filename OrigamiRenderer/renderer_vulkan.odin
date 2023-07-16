@@ -37,6 +37,7 @@ Vulkan_Renderer :: struct {
     swap_chain_image_views: []vk.ImageView,
     swap_chain_image_format: vk.Format,
     swap_chain_extent: vk.Extent2D,
+    pipeline_layout: vk.PipelineLayout,
     debug_messenger: vk.DebugUtilsMessengerEXT,
 }
 
@@ -51,6 +52,7 @@ Vulkan_Error :: enum {
     Cannot_Create_Swap_Chain,
     Cannot_Create_Image_View,
     Cannot_Create_Shader_Module,
+    Cannot_Create_Pipeline_Layout,
 }
 
 Queue_Family_Indices :: struct {
@@ -79,7 +81,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     create_logical_device(r) or_return
     create_swap_chain(r, window_info) or_return
     create_image_views(r) or_return
-    create_graphics_pipeline(r^) or_return
+    create_graphics_pipeline(r) or_return
 
     return
 }
@@ -88,6 +90,7 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
     if enable_validation_layers {
         vk.DestroyDebugUtilsMessengerEXT(instance, debug_messenger, nil)
     }
+    vk.DestroyPipelineLayout(device, pipeline_layout, nil)
     vk.DestroySwapchainKHR(device, swap_chain, nil)
     for image_view in swap_chain_image_views {
         vk.DestroyImageView(device, image_view, nil)
@@ -545,12 +548,14 @@ create_image_views :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     return
 }
 
-create_graphics_pipeline :: proc(r: Vulkan_Renderer) -> (err: Vulkan_Error) {
+create_graphics_pipeline :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     vert_shader_code, ok1 := os.read_entire_file_from_filename("origamiRenderer/shaders/spirv/vert.spv") 
     frag_shader_code, ok2 := os.read_entire_file_from_filename("origamiRenderer/shaders/spirv/frag.spv")
+    defer delete(vert_shader_code)
+    defer delete(frag_shader_code)
 
-    vert_shader_module := vk_create_shader_module(r, vert_shader_code) or_return
-    frag_shader_module := vk_create_shader_module(r, frag_shader_code) or_return
+    vert_shader_module := vk_create_shader_module(r^, vert_shader_code) or_return
+    frag_shader_module := vk_create_shader_module(r^, frag_shader_code) or_return
     defer vk.DestroyShaderModule(r.device, vert_shader_module, nil)
     defer vk.DestroyShaderModule(r.device, frag_shader_module, nil)
 
@@ -569,6 +574,103 @@ create_graphics_pipeline :: proc(r: Vulkan_Renderer) -> (err: Vulkan_Error) {
     }
 
     shader_stages := [?]vk.PipelineShaderStageCreateInfo { vert_shader_stage_info, frag_shader_stage_info }
+
+    vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+        sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        vertexBindingDescriptionCount = 0,
+        pVertexBindingDescriptions = nil, // Optional
+        vertexAttributeDescriptionCount = 0,
+        pVertexAttributeDescriptions = nil, // Optional
+    }
+
+    input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+        sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        topology = .TRIANGLE_LIST,
+        primitiveRestartEnable = false,
+    }
+
+    viewport := vk.Viewport {
+        width = cast(f32) r.swap_chain_extent.width,
+        height = cast(f32) r.swap_chain_extent.width,
+        minDepth = 0,
+        maxDepth = 1,
+    }
+
+    scissor := vk.Rect2D {
+        offset = { x = 0, y = 0 },
+        extent = r.swap_chain_extent,
+    }
+
+    dynamic_states := []vk.DynamicState { .VIEWPORT, .SCISSOR }
+
+    dynamic_state := vk.PipelineDynamicStateCreateInfo {
+        sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        dynamicStateCount = cast(u32) len(dynamic_states),
+        pDynamicStates = raw_data(dynamic_states),
+    }
+
+    viewport_state := vk.PipelineViewportStateCreateInfo {
+        sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        viewportCount = 1,
+        scissorCount = 1,
+    }
+
+    rasterizer := vk.PipelineRasterizationStateCreateInfo {
+        sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        depthClampEnable = false,
+        rasterizerDiscardEnable = false,
+        polygonMode = .FILL,
+        lineWidth = 1,
+        cullMode = { .BACK },
+        frontFace = .CLOCKWISE,
+        depthBiasEnable = false,
+        depthBiasConstantFactor = 0, // Optional
+        depthBiasClamp = 0, // Optional
+        depthBiasSlopeFactor = 0, // Optional
+    }
+
+    multisampling := vk.PipelineMultisampleStateCreateInfo {
+        sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        sampleShadingEnable = false,
+        rasterizationSamples = { ._1 },
+        minSampleShading = 1, // Optional
+        pSampleMask = nil, // Optional
+        alphaToCoverageEnable = false, // Optional
+        alphaToOneEnable = false, // Optional
+    }
+
+    colour_blend_attachment := vk.PipelineColorBlendAttachmentState {
+        colorWriteMask = { .R, .G, .B, .A },
+        blendEnable = false,
+        srcColorBlendFactor = .ONE, // Optional
+        dstColorBlendFactor = .ZERO, // Optional
+        colorBlendOp = .ADD, // Optional
+        srcAlphaBlendFactor = .ONE, // Optional
+        dstAlphaBlendFactor = .ZERO, // Optional
+        alphaBlendOp = .ADD, // Optional
+    }
+
+    colour_blending := vk.PipelineColorBlendStateCreateInfo {
+        sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        logicOpEnable = false,
+        logicOp = .COPY, // Optional
+        attachmentCount = 1,
+        pAttachments = &colour_blend_attachment,
+        blendConstants = { 0, 0, 0, 0 }, // Optional
+    }
+
+    pipeline_layout_info := vk.PipelineLayoutCreateInfo {
+        sType = .PIPELINE_LAYOUT_CREATE_INFO,
+        setLayoutCount = 0, // Optional
+        pSetLayouts = nil, // Optional
+        pushConstantRangeCount = 0, // Optional
+        pPushConstantRanges = nil, // Optional
+    }
+
+    if vk.CreatePipelineLayout(r.device, &pipeline_layout_info, nil, &r.pipeline_layout) != .SUCCESS {
+        log.error("Failed to create pipeline layout.")
+        return .Cannot_Create_Pipeline_Layout
+    }
 
     return
 }
