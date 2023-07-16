@@ -26,18 +26,24 @@ when ODIN_DEBUG {
 
 Vulkan_Renderer :: struct {
     using base: Renderer_Base,
+
     instance: vk.Instance,
     physical_device: vk.PhysicalDevice,
     device: vk.Device,
+
     graphics_queue: vk.Queue,
     present_queue: vk.Queue,
     surface: vk.SurfaceKHR,
+
     swap_chain: vk.SwapchainKHR,
     swap_chain_images: []vk.Image,
     swap_chain_image_views: []vk.ImageView,
     swap_chain_image_format: vk.Format,
     swap_chain_extent: vk.Extent2D,
+
+    render_pass: vk.RenderPass,
     pipeline_layout: vk.PipelineLayout,
+
     debug_messenger: vk.DebugUtilsMessengerEXT,
 }
 
@@ -53,6 +59,7 @@ Vulkan_Error :: enum {
     Cannot_Create_Image_View,
     Cannot_Create_Shader_Module,
     Cannot_Create_Pipeline_Layout,
+    Cannot_Create_Render_Pass,
 }
 
 Queue_Family_Indices :: struct {
@@ -81,6 +88,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     create_logical_device(r) or_return
     create_swap_chain(r, window_info) or_return
     create_image_views(r) or_return
+    create_render_pass(r) or_return
     create_graphics_pipeline(r) or_return
 
     return
@@ -91,6 +99,7 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
         vk.DestroyDebugUtilsMessengerEXT(instance, debug_messenger, nil)
     }
     vk.DestroyPipelineLayout(device, pipeline_layout, nil)
+    vk.DestroyRenderPass(device, render_pass, nil)
     vk.DestroySwapchainKHR(device, swap_chain, nil)
     for image_view in swap_chain_image_views {
         vk.DestroyImageView(device, image_view, nil)
@@ -540,9 +549,48 @@ create_image_views :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
         create_info.subresourceRange.layerCount = 1
 
         if vk.CreateImageView(r.device, &create_info, nil, &r.swap_chain_image_views[i]) != .SUCCESS {
-            log.error("Failed to create image view")
+            log.error("Failed to create image view.")
             return .Cannot_Create_Image_View
         }
+    }
+
+    return
+}
+
+create_render_pass :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    colour_attachment := vk.AttachmentDescription {
+        format = r.swap_chain_image_format,
+        samples = { ._1 },
+        loadOp = .CLEAR,
+        storeOp = .STORE,
+        stencilLoadOp = .DONT_CARE,
+        stencilStoreOp = .DONT_CARE,
+        initialLayout = .UNDEFINED,
+        finalLayout = .PRESENT_SRC_KHR,
+    }
+
+    colour_attachment_ref := vk.AttachmentReference {
+        attachment = 0,
+        layout = .COLOR_ATTACHMENT_OPTIMAL,
+    }
+
+    subpass := vk.SubpassDescription {
+        pipelineBindPoint = .GRAPHICS,
+        colorAttachmentCount = 1,
+        pColorAttachments = &colour_attachment_ref,
+    }
+
+    render_pass_info := vk.RenderPassCreateInfo {
+        sType = .RENDER_PASS_CREATE_INFO,
+        attachmentCount = 1,
+        pAttachments = &colour_attachment,
+        subpassCount = 1,
+        pSubpasses = &subpass,
+    }
+
+    if vk.CreateRenderPass(r.device, &render_pass_info, nil, &r.render_pass) != .SUCCESS {
+        log.error("Failed to create render pass.")
+        return .Cannot_Create_Render_Pass
     }
 
     return
