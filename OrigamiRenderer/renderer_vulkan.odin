@@ -43,6 +43,7 @@ Vulkan_Renderer :: struct {
 
     render_pass: vk.RenderPass,
     pipeline_layout: vk.PipelineLayout,
+    graphics_pipeline: vk.Pipeline,
 
     debug_messenger: vk.DebugUtilsMessengerEXT,
 }
@@ -59,6 +60,7 @@ Vulkan_Error :: enum {
     Cannot_Create_Image_View,
     Cannot_Create_Shader_Module,
     Cannot_Create_Pipeline_Layout,
+    Cannot_Create_Graphics_Pipeline,
     Cannot_Create_Render_Pass,
 }
 
@@ -98,6 +100,7 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
     if enable_validation_layers {
         vk.DestroyDebugUtilsMessengerEXT(instance, debug_messenger, nil)
     }
+    vk.DestroyPipeline(device, graphics_pipeline, nil)
     vk.DestroyPipelineLayout(device, pipeline_layout, nil)
     vk.DestroyRenderPass(device, render_pass, nil)
     vk.DestroySwapchainKHR(device, swap_chain, nil)
@@ -621,7 +624,7 @@ create_graphics_pipeline :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
         pName = "main",
     }
 
-    shader_stages := [?]vk.PipelineShaderStageCreateInfo { vert_shader_stage_info, frag_shader_stage_info }
+    shader_stages := []vk.PipelineShaderStageCreateInfo { vert_shader_stage_info, frag_shader_stage_info }
 
     vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
         sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -718,6 +721,30 @@ create_graphics_pipeline :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     if vk.CreatePipelineLayout(r.device, &pipeline_layout_info, nil, &r.pipeline_layout) != .SUCCESS {
         log.error("Failed to create pipeline layout.")
         return .Cannot_Create_Pipeline_Layout
+    }
+    
+    pipeline_info := vk.GraphicsPipelineCreateInfo {
+        sType = .GRAPHICS_PIPELINE_CREATE_INFO,
+        stageCount = 2,
+        pStages = raw_data(shader_stages),
+        pVertexInputState = &vertex_input_info,
+        pInputAssemblyState = &input_assembly,
+        pViewportState = &viewport_state,
+        pRasterizationState = &rasterizer,
+        pMultisampleState = &multisampling,
+        pDepthStencilState = nil, // Optional
+        pColorBlendState = &colour_blending,
+        pDynamicState = &dynamic_state,
+        layout = r.pipeline_layout,
+        renderPass = r.render_pass,
+        subpass = 0,
+        basePipelineHandle = vk.Pipeline{}, // Optional
+        basePipelineIndex = -1, // Optional
+    }
+
+    if vk.CreateGraphicsPipelines(r.device, vk.PipelineCache{}, 1, &pipeline_info, nil, &r.graphics_pipeline) != .SUCCESS {
+        log.error("Failed to create graphics pipeline.")
+        return .Cannot_Create_Graphics_Pipeline
     }
 
     return
