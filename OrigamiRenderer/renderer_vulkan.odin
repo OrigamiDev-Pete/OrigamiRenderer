@@ -40,6 +40,7 @@ Vulkan_Renderer :: struct {
     swap_chain_image_views: []vk.ImageView,
     swap_chain_image_format: vk.Format,
     swap_chain_extent: vk.Extent2D,
+    swap_chain_framebuffers: [dynamic]vk.Framebuffer,
 
     render_pass: vk.RenderPass,
     pipeline_layout: vk.PipelineLayout,
@@ -62,6 +63,7 @@ Vulkan_Error :: enum {
     Cannot_Create_Pipeline_Layout,
     Cannot_Create_Graphics_Pipeline,
     Cannot_Create_Render_Pass,
+    Cannot_Create_Framebuffer,
 }
 
 Queue_Family_Indices :: struct {
@@ -92,6 +94,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     create_image_views(r) or_return
     create_render_pass(r) or_return
     create_graphics_pipeline(r) or_return
+    create_framebuffers(r) or_return
 
     return
 }
@@ -100,6 +103,11 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
     if enable_validation_layers {
         vk.DestroyDebugUtilsMessengerEXT(instance, debug_messenger, nil)
     }
+
+    for framebuffer in swap_chain_framebuffers {
+        vk.DestroyFramebuffer(device, framebuffer, nil)
+    }
+
     vk.DestroyPipeline(device, graphics_pipeline, nil)
     vk.DestroyPipelineLayout(device, pipeline_layout, nil)
     vk.DestroyRenderPass(device, render_pass, nil)
@@ -115,6 +123,7 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
 
     delete(r.swap_chain_images)
     delete(r.swap_chain_image_views)
+    delete(r.swap_chain_framebuffers)
 }
 
 load_vkGetInstanceProcAddr :: proc() -> rawptr {
@@ -745,6 +754,29 @@ create_graphics_pipeline :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     if vk.CreateGraphicsPipelines(r.device, vk.PipelineCache{}, 1, &pipeline_info, nil, &r.graphics_pipeline) != .SUCCESS {
         log.error("Failed to create graphics pipeline.")
         return .Cannot_Create_Graphics_Pipeline
+    }
+
+    return
+}
+
+create_framebuffers :: proc (r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    resize(&r.swap_chain_framebuffers, len(r.swap_chain_image_views))
+
+    for &attachment, i in r.swap_chain_image_views {
+        framebuffer_info := vk.FramebufferCreateInfo {
+            sType = .FRAMEBUFFER_CREATE_INFO,
+            renderPass = r.render_pass,
+            attachmentCount = 1,
+            pAttachments = &attachment,
+            width = r.swap_chain_extent.width,
+            height = r.swap_chain_extent.height,
+            layers = 1,
+        }
+
+        if vk.CreateFramebuffer(r.device, &framebuffer_info, nil, &r.swap_chain_framebuffers[i]) != .SUCCESS {
+            log.error("Failed to create framebuffer.")
+            return .Cannot_Create_Framebuffer
+        }
     }
 
     return
