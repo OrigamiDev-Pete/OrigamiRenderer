@@ -46,6 +46,13 @@ Vulkan_Renderer :: struct {
     pipeline_layout: vk.PipelineLayout,
     graphics_pipeline: vk.Pipeline,
 
+    command_pool: vk.CommandPool,
+    command_buffer: vk.CommandBuffer,
+
+    image_available_semaphore: vk.Semaphore,
+    render_finished_semaphore: vk.Semaphore,
+    in_flight_fence: vk.Fence,
+
     debug_messenger: vk.DebugUtilsMessengerEXT,
 }
 
@@ -64,6 +71,11 @@ Vulkan_Error :: enum {
     Cannot_Create_Graphics_Pipeline,
     Cannot_Create_Render_Pass,
     Cannot_Create_Framebuffer,
+    Cannot_Create_Command_Pool,
+    Cannot_Create_Command_Buffer,
+    Cannot_Create_Syncronisation_Objects,
+    Cannot_Begin_Command_Buffer_Recording,
+    Cannot_End_Command_Buffer_Recording,
 }
 
 Queue_Family_Indices :: struct {
@@ -88,26 +100,35 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
 
     setup_debug_messenger(r)
     create_surface(r, window_info) or_return
-    pick_physical_device(r) or_return
+    pick_physical_device(r)        or_return
     create_logical_device(r) or_return
     create_swap_chain(r, window_info) or_return
     create_image_views(r) or_return
     create_render_pass(r) or_return
     create_graphics_pipeline(r) or_return
     create_framebuffers(r) or_return
+    create_command_pool(r) or_return
+    create_command_buffer(r) or_return
+    create_sync_objects(r) or_return
 
     return
 }
 
 _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
+    vk.DeviceWaitIdle(r.device)
     if enable_validation_layers {
         vk.DestroyDebugUtilsMessengerEXT(instance, debug_messenger, nil)
     }
+
+    vk.DestroySemaphore(device, image_available_semaphore, nil)
+    vk.DestroySemaphore(device, render_finished_semaphore, nil)
+    vk.DestroyFence(device, in_flight_fence, nil)
 
     for framebuffer in swap_chain_framebuffers {
         vk.DestroyFramebuffer(device, framebuffer, nil)
     }
 
+    vk.DestroyCommandPool(device, command_pool, nil)
     vk.DestroyPipeline(device, graphics_pipeline, nil)
     vk.DestroyPipelineLayout(device, pipeline_layout, nil)
     vk.DestroyRenderPass(device, render_pass, nil)
@@ -119,7 +140,6 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
     vk.DestroyDevice(device, nil)
     vk.DestroySurfaceKHR(instance, surface, nil)
     vk.DestroyInstance(instance, nil)
-
 
     delete(r.swap_chain_images)
     delete(r.swap_chain_image_views)
@@ -592,12 +612,23 @@ create_render_pass :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
         pColorAttachments = &colour_attachment_ref,
     }
 
+    dependency := vk.SubpassDependency {
+        srcSubpass = vk.SUBPASS_EXTERNAL,
+        dstSubpass = 0,
+        srcStageMask = { .COLOR_ATTACHMENT_OUTPUT },
+        srcAccessMask = {},
+        dstStageMask = { .COLOR_ATTACHMENT_OUTPUT },
+        dstAccessMask = { .COLOR_ATTACHMENT_WRITE },
+    }
+
     render_pass_info := vk.RenderPassCreateInfo {
         sType = .RENDER_PASS_CREATE_INFO,
         attachmentCount = 1,
         pAttachments = &colour_attachment,
         subpassCount = 1,
         pSubpasses = &subpass,
+        dependencyCount = 1,
+        pDependencies = &dependency,
     }
 
     if vk.CreateRenderPass(r.device, &render_pass_info, nil, &r.render_pass) != .SUCCESS {
@@ -782,8 +813,159 @@ create_framebuffers :: proc (r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     return
 }
 
-_vk_render :: proc(r: ^Vulkan_Renderer) {
+create_command_pool :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    queue_family_indices := find_queue_families(r^, r.physical_device)
 
+    pool_info := vk.CommandPoolCreateInfo {
+        sType = .COMMAND_POOL_CREATE_INFO,
+        flags = { .RESET_COMMAND_BUFFER },
+        queueFamilyIndex = queue_family_indices.graphics_family.?,
+    }
+    
+    if vk.CreateCommandPool(r.device, &pool_info, nil, &r.command_pool) != .SUCCESS {
+        log.error("Failed to create command pool.")
+        return .Cannot_Create_Command_Pool
+    }
+
+    return
+}
+
+create_command_buffer :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    alloc_info := vk.CommandBufferAllocateInfo {
+        sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+        commandPool = r.command_pool,
+        level = .PRIMARY,
+        commandBufferCount = 1,
+    }
+
+    if vk.AllocateCommandBuffers(r.device, &alloc_info, &r.command_buffer) != .SUCCESS {
+        log.error("Failed to create command buffer.")
+        return .Cannot_Create_Command_Buffer
+    }
+
+    return
+}
+
+record_command_buffer :: proc(r: Vulkan_Renderer, command_buffer: vk.CommandBuffer, image_index: u32) -> (err: Vulkan_Error) {
+    begin_info := vk.CommandBufferBeginInfo {
+        sType = .COMMAND_BUFFER_BEGIN_INFO,
+        flags = {}, // Optional
+        pInheritanceInfo = nil, // Optional
+    }
+
+    if vk.BeginCommandBuffer(command_buffer, &begin_info) != .SUCCESS {
+        log.error("Failed to begin recording command buffer.")
+        return .Cannot_Begin_Command_Buffer_Recording
+    }
+
+    clear_colour := vk.ClearValue {
+        color = { float32 = r.clear_colour },
+    }
+
+    render_pass_info := vk.RenderPassBeginInfo {
+        sType = .RENDER_PASS_BEGIN_INFO,
+        renderPass = r.render_pass,
+        framebuffer = r.swap_chain_framebuffers[image_index],
+        renderArea = { 
+            offset = { 0, 0 }, 
+            extent = r.swap_chain_extent,
+        },
+        clearValueCount = 1,
+        pClearValues = &clear_colour,
+    }
+
+    vk.CmdBeginRenderPass(command_buffer, &render_pass_info, .INLINE)
+
+    vk.CmdBindPipeline(command_buffer, .GRAPHICS, r.graphics_pipeline)
+
+    viewport := vk.Viewport {
+        x = 0, y = 0,
+        width = cast(f32) r.swap_chain_extent.width,
+        height = cast(f32) r.swap_chain_extent.height,
+        minDepth = 0,
+        maxDepth = 1,
+    }
+    vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+
+    scissor := vk.Rect2D {
+        extent = r.swap_chain_extent,
+    }
+    vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+
+    vk.CmdDraw(command_buffer, 3, 1, 0, 0)
+
+    vk.CmdEndRenderPass(command_buffer)
+
+    if vk.EndCommandBuffer(command_buffer) != .SUCCESS {
+        log.error("Failed to record command buffer")
+        return .Cannot_Begin_Command_Buffer_Recording
+    }
+
+    return
+}
+
+create_sync_objects :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    semaphore_info := vk.SemaphoreCreateInfo {
+        sType = .SEMAPHORE_CREATE_INFO,
+    }
+
+    fence_info := vk.FenceCreateInfo {
+        sType = .FENCE_CREATE_INFO,
+        flags = { .SIGNALED }, // Initialise to signaled so the first frame can returns from wait immediately.
+    }
+
+    if vk.CreateSemaphore(r.device, &semaphore_info, nil, &r.image_available_semaphore) != .SUCCESS ||
+        vk.CreateSemaphore(r.device, &semaphore_info, nil, &r.render_finished_semaphore) != .SUCCESS ||
+        vk.CreateFence(r.device, &fence_info, nil, &r.in_flight_fence) != .SUCCESS {
+            log.error("Failed to create semaphores.")
+            return .Cannot_Create_Syncronisation_Objects
+        }
+
+    return
+}
+
+_vk_render :: proc(r: ^Vulkan_Renderer) {
+    vk.WaitForFences(r.device, 1, &r.in_flight_fence, true, max(u64))
+    vk.ResetFences(r.device, 1, &r.in_flight_fence)
+
+    image_index: u32
+    vk.AcquireNextImageKHR(r.device, r.swap_chain, max(u64), r.image_available_semaphore, 0, &image_index)
+
+    vk.ResetCommandBuffer(r.command_buffer, {})
+    record_command_buffer(r^, r.command_buffer, image_index)
+
+    wait_semaphores := []vk.Semaphore{ r.image_available_semaphore }
+    wait_stages := []vk.PipelineStageFlags{ { .COLOR_ATTACHMENT_OUTPUT } }
+    signal_semaphores := []vk.Semaphore{ r.render_finished_semaphore }
+
+    submit_info := vk.SubmitInfo {
+        sType = .SUBMIT_INFO,
+        waitSemaphoreCount = cast(u32) len(wait_semaphores),
+        pWaitSemaphores = raw_data(wait_semaphores),
+        pWaitDstStageMask = raw_data(wait_stages),
+        commandBufferCount = 1,
+        pCommandBuffers = &r.command_buffer,
+        signalSemaphoreCount = cast(u32) len(signal_semaphores),
+        pSignalSemaphores = raw_data(signal_semaphores),
+    }
+
+    if vk.QueueSubmit(r.graphics_queue, 1, &submit_info, r.in_flight_fence) != .SUCCESS {
+        log.error("Failed to submit draw command buffer.")
+    }
+
+    swap_chains := []vk.SwapchainKHR{ r.swap_chain }
+
+    present_info := vk.PresentInfoKHR {
+        sType = .PRESENT_INFO_KHR,
+        waitSemaphoreCount = cast(u32) len(signal_semaphores),
+        pWaitSemaphores = raw_data(signal_semaphores),
+        swapchainCount = cast(u32) len(swap_chains),
+        pSwapchains = raw_data(swap_chains),
+        pImageIndices = &image_index,
+        pResults = nil, // Optional
+    }
+
+    vk.QueuePresentKHR(r.present_queue, &present_info)
 }
 
 setup_debug_messenger :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {

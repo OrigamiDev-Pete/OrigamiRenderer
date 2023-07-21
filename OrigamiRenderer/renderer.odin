@@ -4,9 +4,13 @@ import "core:runtime"
 import vk "vendor:vulkan"
 import win32 "core:sys/windows"
 
+Colour3 :: [3]f32
+Colour4 :: [4]f32
+
 @(private)
 Renderer_Base :: struct {
     window_info: Window_Info,
+    clear_colour: Colour4,
 }
 
 Renderer :: union {
@@ -57,8 +61,16 @@ set_render_api :: proc(api: Render_API) {
     render_api = api
 }
 
+vulkan_renderer :: proc() -> Vulkan_Renderer {
+    return Vulkan_Renderer {}
+}
+
 init_renderer :: proc(renderer: ^Renderer, window_info: Window_Info) -> (err: Error) {
     ctx = new_clone(context)
+
+    r := cast(^Renderer_Base) renderer
+    r.clear_colour = { 0, 0, 0, 1.0 }
+
     switch render_api {
         case .Vulkan:
             return _vk_init_renderer(auto_cast renderer, window_info)

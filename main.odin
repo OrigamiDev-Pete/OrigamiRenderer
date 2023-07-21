@@ -36,7 +36,7 @@ run :: proc() -> int {
 
     setup_window_callbacks(window)
 
-	renderer: or.Renderer = {}
+	renderer: or.Renderer = or.vulkan_renderer()
 	defer or.deinit_renderer(&renderer)
 	if err := or.init_renderer(&renderer, get_platform_window_info(window^)); err != nil {
 		log.error(err)
@@ -45,6 +45,7 @@ run :: proc() -> int {
 
 	for !op.window_should_close(window) {
 
+		or.render(&renderer)
 
 		free_all(context.temp_allocator)
 	}
