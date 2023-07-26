@@ -10,6 +10,8 @@ import win32 "core:sys/windows"
 
 import vk "vendor:vulkan"
 
+max_frames_in_flight :: 2
+
 validation_layers :: []cstring {
     "VK_LAYER_KHRONOS_validation",
 }
@@ -47,11 +49,13 @@ Vulkan_Renderer :: struct {
     graphics_pipeline: vk.Pipeline,
 
     command_pool: vk.CommandPool,
-    command_buffer: vk.CommandBuffer,
+    command_buffers: []vk.CommandBuffer,
 
-    image_available_semaphore: vk.Semaphore,
-    render_finished_semaphore: vk.Semaphore,
-    in_flight_fence: vk.Fence,
+    image_available_semaphores: []vk.Semaphore,
+    render_finished_semaphores: []vk.Semaphore,
+    in_flight_fences: []vk.Fence,
+
+    current_frame: int,
 
     debug_messenger: vk.DebugUtilsMessengerEXT,
 }
@@ -108,7 +112,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     create_graphics_pipeline(r) or_return
     create_framebuffers(r) or_return
     create_command_pool(r) or_return
-    create_command_buffer(r) or_return
+    create_command_buffers(r) or_return
     create_sync_objects(r) or_return
 
     return
@@ -120,9 +124,16 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
         vk.DestroyDebugUtilsMessengerEXT(instance, debug_messenger, nil)
     }
 
-    vk.DestroySemaphore(device, image_available_semaphore, nil)
-    vk.DestroySemaphore(device, render_finished_semaphore, nil)
-    vk.DestroyFence(device, in_flight_fence, nil)
+    for i in 0..<max_frames_in_flight {
+        vk.DestroySemaphore(device, image_available_semaphores[i], nil)
+        vk.DestroySemaphore(device, render_finished_semaphores[i], nil)
+        vk.DestroyFence(device, in_flight_fences[i], nil)
+    }
+
+    delete(command_buffers)
+    delete(image_available_semaphores)
+    delete(render_finished_semaphores)
+    delete(in_flight_fences)
 
     for framebuffer in swap_chain_framebuffers {
         vk.DestroyFramebuffer(device, framebuffer, nil)
@@ -830,16 +841,18 @@ create_command_pool :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     return
 }
 
-create_command_buffer :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+create_command_buffers :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    r.command_buffers = make([]vk.CommandBuffer, max_frames_in_flight)
+
     alloc_info := vk.CommandBufferAllocateInfo {
         sType = .COMMAND_BUFFER_ALLOCATE_INFO,
         commandPool = r.command_pool,
         level = .PRIMARY,
-        commandBufferCount = 1,
+        commandBufferCount = max_frames_in_flight,
     }
 
-    if vk.AllocateCommandBuffers(r.device, &alloc_info, &r.command_buffer) != .SUCCESS {
-        log.error("Failed to create command buffer.")
+    if vk.AllocateCommandBuffers(r.device, &alloc_info, raw_data(r.command_buffers)) != .SUCCESS {
+        log.error("Failed to create command buffers.")
         return .Cannot_Create_Command_Buffer
     }
 
@@ -914,29 +927,35 @@ create_sync_objects :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
         flags = { .SIGNALED }, // Initialise to signaled so the first frame can returns from wait immediately.
     }
 
-    if vk.CreateSemaphore(r.device, &semaphore_info, nil, &r.image_available_semaphore) != .SUCCESS ||
-        vk.CreateSemaphore(r.device, &semaphore_info, nil, &r.render_finished_semaphore) != .SUCCESS ||
-        vk.CreateFence(r.device, &fence_info, nil, &r.in_flight_fence) != .SUCCESS {
-            log.error("Failed to create semaphores.")
-            return .Cannot_Create_Syncronisation_Objects
+    r.image_available_semaphores = make([]vk.Semaphore, max_frames_in_flight)
+    r.render_finished_semaphores = make([]vk.Semaphore, max_frames_in_flight)
+    r.in_flight_fences = make([]vk.Fence, max_frames_in_flight)
+
+    for i in 0..<max_frames_in_flight {
+        if vk.CreateSemaphore(r.device, &semaphore_info, nil, &r.image_available_semaphores[i]) != .SUCCESS ||
+            vk.CreateSemaphore(r.device, &semaphore_info, nil, &r.render_finished_semaphores[i]) != .SUCCESS ||
+            vk.CreateFence(r.device, &fence_info, nil, &r.in_flight_fences[i]) != .SUCCESS {
+                log.error("Failed to create semaphores.")
+                return .Cannot_Create_Syncronisation_Objects
         }
+    }
 
     return
 }
 
 _vk_render :: proc(r: ^Vulkan_Renderer) {
-    vk.WaitForFences(r.device, 1, &r.in_flight_fence, true, max(u64))
-    vk.ResetFences(r.device, 1, &r.in_flight_fence)
+    vk.WaitForFences(r.device, 1, &r.in_flight_fences[r.current_frame], true, max(u64))
+    vk.ResetFences(r.device, 1, &r.in_flight_fences[r.current_frame])
 
     image_index: u32
-    vk.AcquireNextImageKHR(r.device, r.swap_chain, max(u64), r.image_available_semaphore, 0, &image_index)
+    vk.AcquireNextImageKHR(r.device, r.swap_chain, max(u64), r.image_available_semaphores[r.current_frame], 0, &image_index)
 
-    vk.ResetCommandBuffer(r.command_buffer, {})
-    record_command_buffer(r^, r.command_buffer, image_index)
+    vk.ResetCommandBuffer(r.command_buffers[r.current_frame], {})
+    record_command_buffer(r^, r.command_buffers[r.current_frame], image_index)
 
-    wait_semaphores := []vk.Semaphore{ r.image_available_semaphore }
+    wait_semaphores := []vk.Semaphore{ r.image_available_semaphores[r.current_frame] }
     wait_stages := []vk.PipelineStageFlags{ { .COLOR_ATTACHMENT_OUTPUT } }
-    signal_semaphores := []vk.Semaphore{ r.render_finished_semaphore }
+    signal_semaphores := []vk.Semaphore{ r.render_finished_semaphores[r.current_frame] }
 
     submit_info := vk.SubmitInfo {
         sType = .SUBMIT_INFO,
@@ -944,12 +963,12 @@ _vk_render :: proc(r: ^Vulkan_Renderer) {
         pWaitSemaphores = raw_data(wait_semaphores),
         pWaitDstStageMask = raw_data(wait_stages),
         commandBufferCount = 1,
-        pCommandBuffers = &r.command_buffer,
+        pCommandBuffers = &r.command_buffers[r.current_frame],
         signalSemaphoreCount = cast(u32) len(signal_semaphores),
         pSignalSemaphores = raw_data(signal_semaphores),
     }
 
-    if vk.QueueSubmit(r.graphics_queue, 1, &submit_info, r.in_flight_fence) != .SUCCESS {
+    if vk.QueueSubmit(r.graphics_queue, 1, &submit_info, r.in_flight_fences[r.current_frame]) != .SUCCESS {
         log.error("Failed to submit draw command buffer.")
     }
 
@@ -966,6 +985,8 @@ _vk_render :: proc(r: ^Vulkan_Renderer) {
     }
 
     vk.QueuePresentKHR(r.present_queue, &present_info)
+    
+    r.current_frame = (r.current_frame + 1) % max_frames_in_flight
 }
 
 setup_debug_messenger :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
