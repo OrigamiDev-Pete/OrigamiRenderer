@@ -80,6 +80,7 @@ Vulkan_Error :: enum {
     Cannot_Create_Syncronisation_Objects,
     Cannot_Begin_Command_Buffer_Recording,
     Cannot_End_Command_Buffer_Recording,
+    Cannot_Acquire_Swap_Chain_Image,
 }
 
 Queue_Family_Indices :: struct {
@@ -94,6 +95,7 @@ Swap_Chain_Support_Details :: struct {
 }
 
 _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Vulkan_Error) {
+    r.window_info = window_info
     // Get global vulkan procedures
     get_instance_proc_address := load_vkGetInstanceProcAddr()
     vk.load_proc_addresses(get_instance_proc_address)
@@ -120,9 +122,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
 
 _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
     vk.DeviceWaitIdle(r.device)
-    if enable_validation_layers {
-        vk.DestroyDebugUtilsMessengerEXT(instance, debug_messenger, nil)
-    }
+    cleanup_swap_chain(r)
 
     for i in 0..<max_frames_in_flight {
         vk.DestroySemaphore(device, image_available_semaphores[i], nil)
@@ -135,26 +135,19 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
     delete(render_finished_semaphores)
     delete(in_flight_fences)
 
-    for framebuffer in swap_chain_framebuffers {
-        vk.DestroyFramebuffer(device, framebuffer, nil)
-    }
-
     vk.DestroyCommandPool(device, command_pool, nil)
     vk.DestroyPipeline(device, graphics_pipeline, nil)
     vk.DestroyPipelineLayout(device, pipeline_layout, nil)
     vk.DestroyRenderPass(device, render_pass, nil)
-    vk.DestroySwapchainKHR(device, swap_chain, nil)
-    for image_view in swap_chain_image_views {
-        vk.DestroyImageView(device, image_view, nil)
-    }
 
     vk.DestroyDevice(device, nil)
+
+    if enable_validation_layers {
+        vk.DestroyDebugUtilsMessengerEXT(instance, debug_messenger, nil)
+    }
+
     vk.DestroySurfaceKHR(instance, surface, nil)
     vk.DestroyInstance(instance, nil)
-
-    delete(r.swap_chain_images)
-    delete(r.swap_chain_image_views)
-    delete(r.swap_chain_framebuffers)
 }
 
 load_vkGetInstanceProcAddr :: proc() -> rawptr {
@@ -570,6 +563,49 @@ create_swap_chain :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     return
 }
 
+// _vk_resize_window :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) {
+//     recreate_swap_chain(r, window_info)
+// }
+
+cleanup_swap_chain :: proc(r: ^Vulkan_Renderer) {
+    for framebuffer in r.swap_chain_framebuffers {
+        vk.DestroyFramebuffer(r.device, framebuffer, nil)
+    }
+
+    for image_view in r.swap_chain_image_views {
+        vk.DestroyImageView(r.device, image_view, nil)
+    }
+
+    vk.DestroySwapchainKHR(r.device, r.swap_chain, nil)
+
+    delete(r.swap_chain_images)
+    delete(r.swap_chain_image_views)
+    delete(r.swap_chain_framebuffers)
+}
+
+recreate_swap_chain :: proc(r: ^Vulkan_Renderer) {
+    update_window_info_size(&r.window_info)
+    vk.DeviceWaitIdle(r.device)
+
+    /*
+    frame buffers can't have 0 width and height which some platforms may do when minimizing
+    a window. In that case we tell the renderer to skip rendering until we can get a valid
+    framebuffer size.
+    */
+    wi := cast(^Window_Info_Base) &r.window_info
+    if wi.width == 0 && wi.height == 0 {
+        r.skip_render = true
+        return
+    }
+    r.skip_render = false
+
+    cleanup_swap_chain(r)
+
+    create_swap_chain(r, r.window_info)
+    create_image_views(r)
+    create_framebuffers(r)
+}
+
 create_image_views :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     r.swap_chain_image_views = make([]vk.ImageView, len(r.swap_chain_images))
 
@@ -943,12 +979,23 @@ create_sync_objects :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     return
 }
 
-_vk_render :: proc(r: ^Vulkan_Renderer) {
+_vk_render :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    if r.skip_render do return
+
     vk.WaitForFences(r.device, 1, &r.in_flight_fences[r.current_frame], true, max(u64))
-    vk.ResetFences(r.device, 1, &r.in_flight_fences[r.current_frame])
 
     image_index: u32
-    vk.AcquireNextImageKHR(r.device, r.swap_chain, max(u64), r.image_available_semaphores[r.current_frame], 0, &image_index)
+    result := vk.AcquireNextImageKHR(r.device, r.swap_chain, max(u64), r.image_available_semaphores[r.current_frame], 0, &image_index)
+    if result == .ERROR_OUT_OF_DATE_KHR {
+        recreate_swap_chain(r)
+        return
+    } else if result != .SUCCESS && result != .SUBOPTIMAL_KHR {
+        log.error("Failed to acquire swap chain image.")
+        return .Cannot_Acquire_Swap_Chain_Image
+    }
+
+    // Only reset the fencce if we are submitting work
+    vk.ResetFences(r.device, 1, &r.in_flight_fences[r.current_frame])
 
     vk.ResetCommandBuffer(r.command_buffers[r.current_frame], {})
     record_command_buffer(r^, r.command_buffers[r.current_frame], image_index)
@@ -984,9 +1031,18 @@ _vk_render :: proc(r: ^Vulkan_Renderer) {
         pResults = nil, // Optional
     }
 
-    vk.QueuePresentKHR(r.present_queue, &present_info)
+    result = vk.QueuePresentKHR(r.present_queue, &present_info)
+    if result == .ERROR_OUT_OF_DATE_KHR || result == .SUBOPTIMAL_KHR || r.framebuffer_resized {
+        r.framebuffer_resized = false
+        recreate_swap_chain(r)
+        return
+    } else if result != .SUCCESS {
+        log.error("Failed to present swap chain image.")
+        return .Cannot_Acquire_Swap_Chain_Image
+    }
     
     r.current_frame = (r.current_frame + 1) % max_frames_in_flight
+    return
 }
 
 setup_debug_messenger :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {

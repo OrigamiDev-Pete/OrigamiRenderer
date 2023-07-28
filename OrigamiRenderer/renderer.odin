@@ -7,10 +7,11 @@ import win32 "core:sys/windows"
 Colour3 :: [3]f32
 Colour4 :: [4]f32
 
-@(private)
 Renderer_Base :: struct {
     window_info: Window_Info,
     clear_colour: Colour4,
+    framebuffer_resized: bool,
+    skip_render: bool,
 }
 
 Renderer :: union {
@@ -78,11 +79,12 @@ init_renderer :: proc(renderer: ^Renderer, window_info: Window_Info) -> (err: Er
     return
 }
 
-render :: proc(renderer: ^Renderer) {
+render :: proc(renderer: ^Renderer) -> (err: Error) {
     switch render_api {
         case .Vulkan:
-            _vk_render(auto_cast renderer)
+            return _vk_render(auto_cast renderer)
     }
+    return
 }
 
 deinit_renderer :: proc(renderer: ^Renderer) {
@@ -90,5 +92,17 @@ deinit_renderer :: proc(renderer: ^Renderer) {
     switch render_api {
         case .Vulkan:
             _vk_deinit_renderer(auto_cast renderer)
+    }
+}
+
+update_window_info_size :: proc(window_info: ^Window_Info) {
+    when ODIN_OS == .Windows {
+        rect: win32.RECT
+        wi, ok := &window_info.(Win32_Window_Info)
+        if ok {
+            win32.GetClientRect(wi.hwnd, &rect)
+            wi.width = cast(int) rect.right
+            wi.height = cast(int) rect.bottom
+        }
     }
 }
