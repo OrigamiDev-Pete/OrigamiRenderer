@@ -1,6 +1,7 @@
 package OrigamiRenderer
 
 import "core:runtime"
+import "core:math/linalg/glsl"
 import vk "vendor:vulkan"
 import win32 "core:sys/windows"
 
@@ -33,6 +34,11 @@ Win32_Window_Info :: struct {
     hwnd: win32.HWND,
 }
 
+Vertex :: struct {
+    position: glsl.vec2,
+    colour: glsl.vec3,
+}
+
 Render_API :: enum {
     Vulkan,
     // OpenGL,
@@ -45,6 +51,7 @@ Render_API :: enum {
 
 Renderer_Error :: enum {
     None,
+    Cannot_Load_Shader,
 }
 
 Error :: union #shared_nil {
@@ -52,18 +59,23 @@ Error :: union #shared_nil {
     Vulkan_Error,
 }
 
+renderer: ^Renderer
+
 @(private)
 render_api : Render_API = .Vulkan
 
 @(private)
 ctx: ^runtime.Context
 
-set_render_api :: proc(api: Render_API) {
-    render_api = api
-}
-
-vulkan_renderer :: proc() -> Vulkan_Renderer {
-    return Vulkan_Renderer {}
+create_renderer :: proc(type: Render_API) -> ^Renderer {
+    switch type {
+        case .Vulkan:
+            renderer = new(Renderer)
+            renderer^ = Vulkan_Renderer{}
+            return renderer
+        case:
+            return renderer
+    }
 }
 
 init_renderer :: proc(renderer: ^Renderer, window_info: Window_Info) -> (err: Error) {
@@ -87,12 +99,14 @@ render :: proc(renderer: ^Renderer) -> (err: Error) {
     return
 }
 
-deinit_renderer :: proc(renderer: ^Renderer) {
+destroy_renderer :: proc(renderer: ^Renderer) {
     defer free(ctx)
     switch render_api {
         case .Vulkan:
-            _vk_deinit_renderer(auto_cast renderer)
+            _vk_destroy_renderer(auto_cast renderer)
     }
+
+    free(renderer)
 }
 
 update_window_info_size :: proc(window_info: ^Window_Info) {

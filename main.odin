@@ -11,8 +11,6 @@ import or "OrigamiRenderer"
 WIDTH :: 800
 HEIGHT :: 600
 
-renderer: or.Renderer
-
 main :: proc() {
     context.logger = log.create_console_logger()
 	tracking_allocator: mem.Tracking_Allocator
@@ -36,9 +34,9 @@ run :: proc() -> int {
 	}
 	defer op.destroy_window(window)
 
-	renderer = or.vulkan_renderer()
-	defer or.deinit_renderer(&renderer)
-	if err := or.init_renderer(&renderer, get_platform_window_info(window^)); err != nil {
+	renderer : ^or.Renderer = or.create_renderer(.Vulkan)
+	defer or.destroy_renderer(renderer)
+	if err := or.init_renderer(renderer, get_platform_window_info(window^)); err != nil {
 		log.error(err)
 		return 1
 	}
@@ -47,7 +45,7 @@ run :: proc() -> int {
 
 	for !op.window_should_close(window) {
 
-		if or.render(&renderer) != nil {
+		if or.render(renderer) != nil {
 			return 1
 		}
 
@@ -60,7 +58,7 @@ run :: proc() -> int {
 setup_window_callbacks :: proc(window: ^op.Window) {
 	op.window_set_on_resize_callback(window, proc(window: ^op.Window, width, height: u16) {
 		log.debug("Window resized to ", width, "x", height)
-		r := cast(^or.Renderer_Base) &renderer
+		r := cast(^or.Renderer_Base) or.renderer
 		r.framebuffer_resized = true
 	})
 

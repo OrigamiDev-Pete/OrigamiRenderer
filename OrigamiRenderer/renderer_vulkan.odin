@@ -48,6 +48,9 @@ Vulkan_Renderer :: struct {
     pipeline_layout: vk.PipelineLayout,
     graphics_pipeline: vk.Pipeline,
 
+    programs: Resource_Pool(Vulkan_Program),
+    shaders: Resource_Pool(Vulkan_Shader),
+
     command_pool: vk.CommandPool,
     command_buffers: []vk.CommandBuffer,
 
@@ -94,8 +97,18 @@ Swap_Chain_Support_Details :: struct {
     present_modes: []vk.PresentModeKHR,
 }
 
+vertices :: []Vertex {
+    { {  0.0, -0.5 }, { 1, 0, 0 } },
+    { {  0.5,  0.5 }, { 0, 1, 0 } },
+    { { -0.5,  0.5 }, { 0, 0, 1 } },
+}
+
 _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Vulkan_Error) {
     r.window_info = window_info
+
+    init_resource_pool(&r.shaders, 128)
+    init_resource_pool(&r.programs, 128)
+
     // Get global vulkan procedures
     get_instance_proc_address := load_vkGetInstanceProcAddr()
     vk.load_proc_addresses(get_instance_proc_address)
@@ -106,7 +119,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
 
     setup_debug_messenger(r)
     create_surface(r, window_info) or_return
-    pick_physical_device(r)        or_return
+    pick_physical_device(r) or_return
     create_logical_device(r) or_return
     create_swap_chain(r, window_info) or_return
     create_image_views(r) or_return
@@ -120,7 +133,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     return
 }
 
-_vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
+_vk_destroy_renderer :: proc(using r: ^Vulkan_Renderer) {
     vk.DeviceWaitIdle(r.device)
     cleanup_swap_chain(r)
 
@@ -140,6 +153,10 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
     vk.DestroyPipelineLayout(device, pipeline_layout, nil)
     vk.DestroyRenderPass(device, render_pass, nil)
 
+    // for &shader in shaders {
+    //     _vk_destroy_shader(&shader)
+    // }
+
     vk.DestroyDevice(device, nil)
 
     if enable_validation_layers {
@@ -148,6 +165,10 @@ _vk_deinit_renderer :: proc(using r: ^Vulkan_Renderer) {
 
     vk.DestroySurfaceKHR(instance, surface, nil)
     vk.DestroyInstance(instance, nil)
+
+    // delete(programs)
+    // delete(shaders)
+    // delete(shader_index_map)
 }
 
 load_vkGetInstanceProcAddr :: proc() -> rawptr {
@@ -692,147 +713,18 @@ create_graphics_pipeline :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     defer delete(vert_shader_code)
     defer delete(frag_shader_code)
 
-    vert_shader_module := vk_create_shader_module(r^, vert_shader_code) or_return
-    frag_shader_module := vk_create_shader_module(r^, frag_shader_code) or_return
-    defer vk.DestroyShaderModule(r.device, vert_shader_module, nil)
-    defer vk.DestroyShaderModule(r.device, frag_shader_module, nil)
+    // vert_shader_module := vk_create_shader_module(r^, vert_shader_code) or_return
+    // frag_shader_module := vk_create_shader_module(r^, frag_shader_code) or_return
+    // defer vk.DestroyShaderModule(r.device, vert_shader_module, nil)
+    // defer vk.DestroyShaderModule(r.device, frag_shader_module, nil)
 
-    vert_shader_stage_info := vk.PipelineShaderStageCreateInfo {
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = { .VERTEX },
-        module = vert_shader_module,
-        pName = "main",
-    }
+    vert_handle, vert_err := _vk_create_shader(vert_shader_code)
+    frag_handle, frag_err := _vk_create_shader(frag_shader_code)
+    // vert_shader_module := r.shaders[vert_handle].module
+    // frag_shader_module := r.shaders[frag_handle].module
 
-    frag_shader_stage_info := vk.PipelineShaderStageCreateInfo {
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = { .FRAGMENT },
-        module = frag_shader_module,
-        pName = "main",
-    }
+    vk_create_program(vert_handle, frag_handle)
 
-    shader_stages := []vk.PipelineShaderStageCreateInfo { vert_shader_stage_info, frag_shader_stage_info }
-
-    vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
-        sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        vertexBindingDescriptionCount = 0,
-        pVertexBindingDescriptions = nil, // Optional
-        vertexAttributeDescriptionCount = 0,
-        pVertexAttributeDescriptions = nil, // Optional
-    }
-
-    input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
-        sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        topology = .TRIANGLE_LIST,
-        primitiveRestartEnable = false,
-    }
-
-    viewport := vk.Viewport {
-        width = cast(f32) r.swap_chain_extent.width,
-        height = cast(f32) r.swap_chain_extent.width,
-        minDepth = 0,
-        maxDepth = 1,
-    }
-
-    scissor := vk.Rect2D {
-        offset = { x = 0, y = 0 },
-        extent = r.swap_chain_extent,
-    }
-
-    dynamic_states := []vk.DynamicState { .VIEWPORT, .SCISSOR }
-
-    dynamic_state := vk.PipelineDynamicStateCreateInfo {
-        sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        dynamicStateCount = cast(u32) len(dynamic_states),
-        pDynamicStates = raw_data(dynamic_states),
-    }
-
-    viewport_state := vk.PipelineViewportStateCreateInfo {
-        sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        viewportCount = 1,
-        scissorCount = 1,
-    }
-
-    rasterizer := vk.PipelineRasterizationStateCreateInfo {
-        sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        depthClampEnable = false,
-        rasterizerDiscardEnable = false,
-        polygonMode = .FILL,
-        lineWidth = 1,
-        cullMode = { .BACK },
-        frontFace = .CLOCKWISE,
-        depthBiasEnable = false,
-        depthBiasConstantFactor = 0, // Optional
-        depthBiasClamp = 0, // Optional
-        depthBiasSlopeFactor = 0, // Optional
-    }
-
-    multisampling := vk.PipelineMultisampleStateCreateInfo {
-        sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        sampleShadingEnable = false,
-        rasterizationSamples = { ._1 },
-        minSampleShading = 1, // Optional
-        pSampleMask = nil, // Optional
-        alphaToCoverageEnable = false, // Optional
-        alphaToOneEnable = false, // Optional
-    }
-
-    colour_blend_attachment := vk.PipelineColorBlendAttachmentState {
-        colorWriteMask = { .R, .G, .B, .A },
-        blendEnable = false,
-        srcColorBlendFactor = .ONE, // Optional
-        dstColorBlendFactor = .ZERO, // Optional
-        colorBlendOp = .ADD, // Optional
-        srcAlphaBlendFactor = .ONE, // Optional
-        dstAlphaBlendFactor = .ZERO, // Optional
-        alphaBlendOp = .ADD, // Optional
-    }
-
-    colour_blending := vk.PipelineColorBlendStateCreateInfo {
-        sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        logicOpEnable = false,
-        logicOp = .COPY, // Optional
-        attachmentCount = 1,
-        pAttachments = &colour_blend_attachment,
-        blendConstants = { 0, 0, 0, 0 }, // Optional
-    }
-
-    pipeline_layout_info := vk.PipelineLayoutCreateInfo {
-        sType = .PIPELINE_LAYOUT_CREATE_INFO,
-        setLayoutCount = 0, // Optional
-        pSetLayouts = nil, // Optional
-        pushConstantRangeCount = 0, // Optional
-        pPushConstantRanges = nil, // Optional
-    }
-
-    if vk.CreatePipelineLayout(r.device, &pipeline_layout_info, nil, &r.pipeline_layout) != .SUCCESS {
-        log.error("Failed to create pipeline layout.")
-        return .Cannot_Create_Pipeline_Layout
-    }
-    
-    pipeline_info := vk.GraphicsPipelineCreateInfo {
-        sType = .GRAPHICS_PIPELINE_CREATE_INFO,
-        stageCount = 2,
-        pStages = raw_data(shader_stages),
-        pVertexInputState = &vertex_input_info,
-        pInputAssemblyState = &input_assembly,
-        pViewportState = &viewport_state,
-        pRasterizationState = &rasterizer,
-        pMultisampleState = &multisampling,
-        pDepthStencilState = nil, // Optional
-        pColorBlendState = &colour_blending,
-        pDynamicState = &dynamic_state,
-        layout = r.pipeline_layout,
-        renderPass = r.render_pass,
-        subpass = 0,
-        basePipelineHandle = vk.Pipeline{}, // Optional
-        basePipelineIndex = -1, // Optional
-    }
-
-    if vk.CreateGraphicsPipelines(r.device, vk.PipelineCache{}, 1, &pipeline_info, nil, &r.graphics_pipeline) != .SUCCESS {
-        log.error("Failed to create graphics pipeline.")
-        return .Cannot_Create_Graphics_Pipeline
-    }
 
     return
 }
