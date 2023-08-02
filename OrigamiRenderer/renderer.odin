@@ -13,6 +13,8 @@ Renderer_Base :: struct {
     clear_colour: Colour4,
     framebuffer_resized: bool,
     skip_render: bool,
+    meshes: [dynamic]^Mesh,
+    materials: map[string]Material,
 }
 
 Renderer :: union {
@@ -34,11 +36,6 @@ Win32_Window_Info :: struct {
     hwnd: win32.HWND,
 }
 
-Vertex :: struct {
-    position: glsl.vec2,
-    colour: glsl.vec3,
-}
-
 Render_API :: enum {
     Vulkan,
     // OpenGL,
@@ -52,6 +49,7 @@ Render_API :: enum {
 Renderer_Error :: enum {
     None,
     Cannot_Load_Shader,
+    Invalid_Renderer,
 }
 
 Error :: union #shared_nil {
@@ -60,9 +58,6 @@ Error :: union #shared_nil {
 }
 
 renderer: ^Renderer
-
-@(private)
-render_api : Render_API = .Vulkan
 
 @(private)
 ctx: ^runtime.Context
@@ -84,16 +79,16 @@ init_renderer :: proc(renderer: ^Renderer, window_info: Window_Info) -> (err: Er
     r := cast(^Renderer_Base) renderer
     r.clear_colour = { 0, 0, 0, 1.0 }
 
-    switch render_api {
-        case .Vulkan:
+    switch r in renderer {
+        case Vulkan_Renderer:
             return _vk_init_renderer(auto_cast renderer, window_info)
     }
     return
 }
 
 render :: proc(renderer: ^Renderer) -> (err: Error) {
-    switch render_api {
-        case .Vulkan:
+    switch r in renderer {
+        case Vulkan_Renderer:
             return _vk_render(auto_cast renderer)
     }
     return
@@ -101,10 +96,14 @@ render :: proc(renderer: ^Renderer) -> (err: Error) {
 
 destroy_renderer :: proc(renderer: ^Renderer) {
     defer free(ctx)
-    switch render_api {
-        case .Vulkan:
+    switch r in renderer {
+        case Vulkan_Renderer:
             _vk_destroy_renderer(auto_cast renderer)
     }
+
+    r := cast(^Renderer_Base) renderer
+    delete(r.meshes)
+    delete(r.materials)
 
     free(renderer)
 }

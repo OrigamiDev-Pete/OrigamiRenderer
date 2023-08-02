@@ -13,25 +13,29 @@ Vulkan_Shader :: struct {
 
 Vulkan_Program :: struct {
     using base: Program_Base,
+}
+
+Vulkan_Material :: struct {
+    using base: Material_Base,
     pipeline_layout: vk.PipelineLayout,
     pipeline: vk.Pipeline,
 }
 
-_vk_create_shader :: proc(code: []u8) -> (Shader_Handle, Vulkan_Error) {
-    r := &renderer.(Vulkan_Renderer)
+_vk_create_shader :: proc(r: ^Vulkan_Renderer, code: []u8) -> (^Vulkan_Shader, Vulkan_Error) {
     module, error := vk_create_shader_module(r^, code)
-    if error != nil do return 0, .Cannot_Create_Shader_Module
+    if error != nil do return nil, .Cannot_Create_Shader_Module
 
-    handle, shader := resource_pool_allocate(&r.shaders)
-    shader.code = code
-    shader.module = module
+    shader := new(Shader)
+    shader^ = Vulkan_Shader { 
+        code = code,
+        module = module,
+    }
 
-    return auto_cast handle, .None
+    return auto_cast shader, .None
 }
 
-_vk_destroy_shader :: proc(shader: ^Vulkan_Shader) {
+_vk_destroy_shader :: proc(r: Vulkan_Renderer, shader: ^Vulkan_Shader) {
     delete(shader.code)
-    r := renderer.(Vulkan_Renderer)
     vk.DestroyShaderModule(r.device, shader.module, nil)
     free(shader)
 }
@@ -52,39 +56,52 @@ vk_create_shader_module :: proc(r: Vulkan_Renderer, code: []u8) -> (vk.ShaderMod
     return shader_module, .None
 }
 
-vk_create_program :: proc(vertex_handle, fragment_handle: Shader_Handle) -> (Program_Handle, Vulkan_Error) {
-    r := &renderer.(Vulkan_Renderer)
+_vk_create_program :: proc(r: ^Vulkan_Renderer, vertex_shader, fragment_shader: ^Vulkan_Shader) -> (^Vulkan_Program, Vulkan_Error) {
+    program := new(Program)
 
-    vertex_shader := resource_pool_get(&r.shaders, auto_cast vertex_handle)
-    frag_shader := resource_pool_get(&r.shaders, auto_cast fragment_handle)
+    program^ = Vulkan_Program{
+        vertex_shader = auto_cast vertex_shader,
+        fragment_shader = auto_cast fragment_shader,
+    }
 
-    program_handle, program := resource_pool_allocate(&r.programs)
+    return auto_cast program, .None
+}
 
-    program.vertex_shader = vertex_handle
-    program.fragment_shader = fragment_handle
+vk_destroy_program :: proc(r: ^Vulkan_Renderer, program: ^Vulkan_Program) {
+    _vk_destroy_shader(r^, auto_cast program.vertex_shader)
+    _vk_destroy_shader(r^, auto_cast program.fragment_shader)
+}
+
+_vk_create_material :: proc(r: ^Vulkan_Renderer, program: ^Vulkan_Program, vertex_layout: Vertex_Layout = default_vertex_layout) -> (^Vulkan_Material, Vulkan_Error) {
+    material := new(Material)
+
+    material^ = Vulkan_Material{}
+    m := &material.(Vulkan_Material)
 
     vert_shader_stage_info := vk.PipelineShaderStageCreateInfo {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = { .VERTEX },
-        module = vertex_shader.module,
+        module = program.vertex_shader.(Vulkan_Shader).module,
         pName = "main",
     }
 
     frag_shader_stage_info := vk.PipelineShaderStageCreateInfo {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = { .FRAGMENT },
-        module = frag_shader.module,
+        module = program.fragment_shader.(Vulkan_Shader).module,
         pName = "main",
     }
 
     shader_stages := []vk.PipelineShaderStageCreateInfo { vert_shader_stage_info, frag_shader_stage_info }
 
+    vertex_binding_description, vertex_attribute_descriptions := vk_get_vertex_input_descriptions(vertex_layout)
+
     vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
         sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        vertexBindingDescriptionCount = 0,
-        pVertexBindingDescriptions = nil, // Optional
-        vertexAttributeDescriptionCount = 0,
-        pVertexAttributeDescriptions = nil, // Optional
+        vertexBindingDescriptionCount = 1,
+        pVertexBindingDescriptions = &vertex_binding_description,
+        vertexAttributeDescriptionCount = cast(u32) len(vertex_attribute_descriptions),
+        pVertexAttributeDescriptions = raw_data(vertex_attribute_descriptions), // Optional
     }
 
     input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
@@ -171,11 +188,10 @@ vk_create_program :: proc(vertex_handle, fragment_handle: Shader_Handle) -> (Pro
         pPushConstantRanges = nil, // Optional
     }
 
-    if vk.CreatePipelineLayout(r.device, &pipeline_layout_info, nil, &r.pipeline_layout) != .SUCCESS {
+    if vk.CreatePipelineLayout(r.device, &pipeline_layout_info, nil, &m.pipeline_layout) != .SUCCESS {
         log.error("Failed to create pipeline layout.")
-        return 0, .Cannot_Create_Pipeline_Layout
+        return nil, .Cannot_Create_Pipeline_Layout
     }
-    
     pipeline_info := vk.GraphicsPipelineCreateInfo {
         sType = .GRAPHICS_PIPELINE_CREATE_INFO,
         stageCount = 2,
@@ -195,11 +211,35 @@ vk_create_program :: proc(vertex_handle, fragment_handle: Shader_Handle) -> (Pro
         basePipelineIndex = -1, // Optional
     }
 
-    if vk.CreateGraphicsPipelines(r.device, vk.PipelineCache{}, 1, &pipeline_info, nil, &r.graphics_pipeline) != .SUCCESS {
+    if vk.CreateGraphicsPipelines(r.device, vk.PipelineCache{}, 1, &pipeline_info, nil, &m.pipeline) != .SUCCESS {
         log.error("Failed to create graphics pipeline.")
-        return 0, .Cannot_Create_Graphics_Pipeline
+        return nil, .Cannot_Create_Graphics_Pipeline
+    }
+    return auto_cast material, .None
+}
+
+vk_get_vertex_input_descriptions :: proc(vertex_layout: Vertex_Layout) -> (vk.VertexInputBindingDescription, []vk.VertexInputAttributeDescription) {
+    attribute_descriptions := make([]vk.VertexInputAttributeDescription, len(vertex_layout.attributes), context.temp_allocator)
+    stride: u32
+    offset: u32
+    for attribute, i in vertex_layout.attributes {
+        stride += cast(u32) get_vertex_attribute_type_size(attribute.type)
+
+        attribute_descriptions[i].binding = 0
+        attribute_descriptions[i].location = cast(u32) i
+        attribute_descriptions[i].format = vk_get_vertex_format(attribute.type, attribute.number)
+        attribute_descriptions[i].offset = offset
     }
 
-    return 0, .None
+    binding_description := vk.VertexInputBindingDescription {
+        binding = 0,
+        stride = stride,
+        inputRate = .VERTEX,
+    }
 
+    return binding_description, attribute_descriptions
+}
+
+vk_get_vertex_format :: proc(type: Vertex_Attribute_Type, number: u8) -> vk.Format {
+    return vk_vertex_attribute_format_map[type][number]
 }

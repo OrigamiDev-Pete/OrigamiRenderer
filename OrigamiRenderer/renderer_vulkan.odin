@@ -74,6 +74,7 @@ Vulkan_Error :: enum {
     Cannot_Create_Swap_Chain,
     Cannot_Create_Image_View,
     Cannot_Create_Shader_Module,
+    Cannot_Create_Program,
     Cannot_Create_Pipeline_Layout,
     Cannot_Create_Graphics_Pipeline,
     Cannot_Create_Render_Pass,
@@ -97,11 +98,6 @@ Swap_Chain_Support_Details :: struct {
     present_modes: []vk.PresentModeKHR,
 }
 
-vertices :: []Vertex {
-    { {  0.0, -0.5 }, { 1, 0, 0 } },
-    { {  0.5,  0.5 }, { 0, 1, 0 } },
-    { { -0.5,  0.5 }, { 0, 0, 1 } },
-}
 
 _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Vulkan_Error) {
     r.window_info = window_info
@@ -157,6 +153,9 @@ _vk_destroy_renderer :: proc(using r: ^Vulkan_Renderer) {
     //     _vk_destroy_shader(&shader)
     // }
 
+    deinit_resource_pool(&shaders)
+    deinit_resource_pool(&programs)
+
     vk.DestroyDevice(device, nil)
 
     if enable_validation_layers {
@@ -165,10 +164,6 @@ _vk_destroy_renderer :: proc(using r: ^Vulkan_Renderer) {
 
     vk.DestroySurfaceKHR(instance, surface, nil)
     vk.DestroyInstance(instance, nil)
-
-    // delete(programs)
-    // delete(shaders)
-    // delete(shader_index_map)
 }
 
 load_vkGetInstanceProcAddr :: proc() -> rawptr {
@@ -718,13 +713,23 @@ create_graphics_pipeline :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     // defer vk.DestroyShaderModule(r.device, vert_shader_module, nil)
     // defer vk.DestroyShaderModule(r.device, frag_shader_module, nil)
 
-    vert_handle, vert_err := _vk_create_shader(vert_shader_code)
-    frag_handle, frag_err := _vk_create_shader(frag_shader_code)
+    vert_handle, vert_err := _vk_create_shader(r, vert_shader_code)
+    frag_handle, frag_err := _vk_create_shader(r, frag_shader_code)
     // vert_shader_module := r.shaders[vert_handle].module
     // frag_shader_module := r.shaders[frag_handle].module
 
-    vk_create_program(vert_handle, frag_handle)
+    program, _ := _vk_create_program(r, vert_handle, frag_handle)
 
+    vertex_layout := Vertex_Layout {
+        {
+            { .Position, .Float32, 2 },
+            { .Colour, .Float32, 3 },
+        }
+    }
+
+    material, _ := _vk_create_material(r, program, vertex_layout)
+    
+    //Todo(Pete): create vk_mesh
 
     return
 }
@@ -869,6 +874,35 @@ create_sync_objects :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     }
 
     return
+}
+
+get_binding_description :: proc() -> vk.VertexInputBindingDescription {
+    binding_description := vk.VertexInputBindingDescription {
+        binding = 0,
+        stride = size_of(Vertex),
+        inputRate = .VERTEX,
+    }
+
+    return binding_description
+}
+
+get_attribute_descriptions :: proc() -> [2]vk.VertexInputAttributeDescription {
+    attribute_descriptions := [2]vk.VertexInputAttributeDescription {
+        { 
+            binding = 0,
+            location = 0,
+            format = .R32G32_SFLOAT,
+            offset = cast(u32) offset_of(Vertex, position),
+        },
+        {
+            binding = 0,
+            location = 1,
+            format = .R32G32B32_SFLOAT,
+            offset = cast(u32) offset_of(Vertex, colour),
+        },
+    }
+
+    return attribute_descriptions
 }
 
 _vk_render :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {

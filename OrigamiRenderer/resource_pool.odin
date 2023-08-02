@@ -1,6 +1,6 @@
 package OrigamiRenderer
 
-Resource_Pool :: struct($T: typeid) {
+Resource_Pool :: struct($T:typeid) {
     data: []T,
     available_handles: []Resource_Handle,
     available_handles_head: int,
@@ -49,6 +49,6 @@ resource_pool_release :: proc(using pool: ^Resource_Pool($T), handle: Resource_H
     available_handles[available_handles_head] = handle
 }
 
-resource_pool_get :: proc(using pool: ^Resource_Pool($T), handle: Resource_Handle) -> ^T {
+resource_pool_get :: proc(using pool: Resource_Pool($T), handle: Resource_Handle) -> ^T {
     return &data[handle]
 }

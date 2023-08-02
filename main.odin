@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:os"
+import "core:slice"
 
 import op "OrigamiPlatform"
 import or "OrigamiRenderer"
@@ -42,6 +43,7 @@ run :: proc() -> int {
 	}
 
     setup_window_callbacks(window)
+	// setup_scene(renderer)
 
 	for !op.window_should_close(window) {
 
@@ -79,4 +81,17 @@ get_platform_window_info :: proc(window: op.Window) -> (info: or.Window_Info) {
 		info = win32_info
 		return
 	}
+}
+
+setup_scene :: proc(renderer: ^or.Renderer) {
+
+	triangle_vertices := []or.Vertex {
+		{ {  0.0, -0.5 }, { 1, 0, 0 } },
+		{ {  0.5,  0.5 }, { 0, 1, 0 } },
+		{ { -0.5,  0.5 }, { 0, 0, 1 } },
+	}
+
+	// or.load
+
+	triangle := or.create_mesh(renderer^, slice.clone(triangle_vertices))
 }
