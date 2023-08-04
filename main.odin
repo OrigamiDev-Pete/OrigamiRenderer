@@ -85,13 +85,13 @@ get_platform_window_info :: proc(window: op.Window) -> (info: or.Window_Info) {
 
 setup_scene :: proc(renderer: ^or.Renderer) {
 
-	triangle_vertices := []or.Vertex {
-		{ {  0.0, -0.5 }, { 1, 0, 0 } },
-		{ {  0.5,  0.5 }, { 0, 1, 0 } },
-		{ { -0.5,  0.5 }, { 0, 0, 1 } },
-	}
+	// triangle_vertices := []or.Vertex {
+	// 	{ {  0.0, -0.5 }, { 1, 0, 0 } },
+	// 	{ {  0.5,  0.5 }, { 0, 1, 0 } },
+	// 	{ { -0.5,  0.5 }, { 0, 0, 1 } },
+	// }
 
-	// or.load
+	// // or.load
 
-	triangle := or.create_mesh(renderer^, slice.clone(triangle_vertices))
+	// triangle, _ := or.create_mesh(renderer, slice.clone(triangle_vertices))
 }

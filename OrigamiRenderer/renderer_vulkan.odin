@@ -5,6 +5,7 @@ import "core:dynlib"
 import "core:log"
 import "core:os"
 import "core:runtime"
+import "core:slice"
 import "core:strings"
 import win32 "core:sys/windows"
 
@@ -45,8 +46,8 @@ Vulkan_Renderer :: struct {
     swap_chain_framebuffers: [dynamic]vk.Framebuffer,
 
     render_pass: vk.RenderPass,
-    pipeline_layout: vk.PipelineLayout,
-    graphics_pipeline: vk.Pipeline,
+    // pipeline_layout: vk.PipelineLayout,
+    // graphics_pipeline: vk.Pipeline,
 
     programs: Resource_Pool(Vulkan_Program),
     shaders: Resource_Pool(Vulkan_Shader),
@@ -85,6 +86,9 @@ Vulkan_Error :: enum {
     Cannot_Begin_Command_Buffer_Recording,
     Cannot_End_Command_Buffer_Recording,
     Cannot_Acquire_Swap_Chain_Image,
+    Cannot_Create_Buffer,
+    Cannot_Find_Suitable_Memory_Type,
+    Cannot_Allocate_Memory,
 }
 
 Queue_Family_Indices :: struct {
@@ -145,13 +149,21 @@ _vk_destroy_renderer :: proc(using r: ^Vulkan_Renderer) {
     delete(in_flight_fences)
 
     vk.DestroyCommandPool(device, command_pool, nil)
-    vk.DestroyPipeline(device, graphics_pipeline, nil)
-    vk.DestroyPipelineLayout(device, pipeline_layout, nil)
+    // vk.DestroyPipeline(device, graphics_pipeline, nil)
+    // vk.DestroyPipelineLayout(device, pipeline_layout, nil)
     vk.DestroyRenderPass(device, render_pass, nil)
 
     // for &shader in shaders {
     //     _vk_destroy_shader(&shader)
     // }
+
+    for &mesh in meshes {
+        _vk_destroy_mesh(auto_cast mesh, r^)
+    }
+
+    for &material in materials {
+        _vk_destroy_material(auto_cast material, r^)
+    }
 
     deinit_resource_pool(&shaders)
     deinit_resource_pool(&programs)
@@ -724,12 +736,18 @@ create_graphics_pipeline :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
         {
             { .Position, .Float32, 2 },
             { .Colour, .Float32, 3 },
-        }
+        },
     }
 
     material, _ := _vk_create_material(r, program, vertex_layout)
     
     //Todo(Pete): create vk_mesh
+	triangle_vertices := []Vertex {
+		{ {  0.0, -0.5 }, { 1, 0, 0 } },
+		{ {  0.5,  0.5 }, { 0, 1, 0 } },
+		{ { -0.5,  0.5 }, { 0, 0, 1 } },
+	}
+    mesh, _ := _vk_create_mesh(r, slice.clone(triangle_vertices), material)
 
     return
 }
@@ -822,7 +840,12 @@ record_command_buffer :: proc(r: Vulkan_Renderer, command_buffer: vk.CommandBuff
 
     vk.CmdBeginRenderPass(command_buffer, &render_pass_info, .INLINE)
 
-    vk.CmdBindPipeline(command_buffer, .GRAPHICS, r.graphics_pipeline)
+    mesh := r.meshes[0].(Vulkan_Mesh)
+
+    vk.CmdBindPipeline(command_buffer, .GRAPHICS, mesh.material.(Vulkan_Material).pipeline)
+    vertex_buffers := []vk.Buffer { mesh.vertex_buffer }
+    offsets := []vk.DeviceSize { 0 }
+    vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(vertex_buffers), raw_data(offsets))
 
     viewport := vk.Viewport {
         x = 0, y = 0,
@@ -838,7 +861,7 @@ record_command_buffer :: proc(r: Vulkan_Renderer, command_buffer: vk.CommandBuff
     }
     vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 
-    vk.CmdDraw(command_buffer, 3, 1, 0, 0)
+    vk.CmdDraw(command_buffer, cast(u32) len(mesh.vertices), 1, 0, 0)
 
     vk.CmdEndRenderPass(command_buffer)
 
@@ -903,6 +926,20 @@ get_attribute_descriptions :: proc() -> [2]vk.VertexInputAttributeDescription {
     }
 
     return attribute_descriptions
+}
+
+find_memory_type :: proc(r: Vulkan_Renderer, type_filter: u32, properties: vk.MemoryPropertyFlags) -> (u32, Vulkan_Error) {
+    memory_properties: vk.PhysicalDeviceMemoryProperties
+    vk.GetPhysicalDeviceMemoryProperties(r.physical_device, &memory_properties)
+
+    for i in 0..<memory_properties.memoryTypeCount {
+        if type_filter & (1 << i) > 0 && memory_properties.memoryTypes[i].propertyFlags & properties == properties {
+           return i, .None
+        }
+    }
+
+    log.error("Failed to find suitable memory type.")
+    return 0, .Cannot_Find_Suitable_Memory_Type
 }
 
 _vk_render :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {

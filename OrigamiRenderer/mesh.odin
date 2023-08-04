@@ -83,9 +83,16 @@ create_mesh :: proc(renderer: ^Renderer, vertices: []Vertex, material: ^Material
 
     switch r in renderer {
         case Vulkan_Renderer:
-            mesh, err := vk_create_mesh(auto_cast &r, vertices, material)
+            mesh, err := _vk_create_mesh(auto_cast &r, vertices, auto_cast material)
             return auto_cast mesh, err
         case:
             return nil, .Invalid_Renderer
+    }
+}
+
+destroy_mesh :: proc(mesh: ^Mesh, renderer: Renderer) {
+    switch r in renderer {
+        case Vulkan_Renderer:
+            _vk_destroy_mesh(auto_cast mesh, renderer.(Vulkan_Renderer))
     }
 }

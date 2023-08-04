@@ -67,9 +67,9 @@ _vk_create_program :: proc(r: ^Vulkan_Renderer, vertex_shader, fragment_shader: 
     return auto_cast program, .None
 }
 
-vk_destroy_program :: proc(r: ^Vulkan_Renderer, program: ^Vulkan_Program) {
-    _vk_destroy_shader(r^, auto_cast program.vertex_shader)
-    _vk_destroy_shader(r^, auto_cast program.fragment_shader)
+_vk_destroy_program :: proc(program: ^Vulkan_Program, r: Vulkan_Renderer, ) {
+    _vk_destroy_shader(r, auto_cast program.vertex_shader)
+    _vk_destroy_shader(r, auto_cast program.fragment_shader)
 }
 
 _vk_create_material :: proc(r: ^Vulkan_Renderer, program: ^Vulkan_Program, vertex_layout: Vertex_Layout = default_vertex_layout) -> (^Vulkan_Material, Vulkan_Error) {
@@ -204,7 +204,7 @@ _vk_create_material :: proc(r: ^Vulkan_Renderer, program: ^Vulkan_Program, verte
         pDepthStencilState = nil, // Optional
         pColorBlendState = &colour_blending,
         pDynamicState = &dynamic_state,
-        layout = r.pipeline_layout,
+        layout = m.pipeline_layout,
         renderPass = r.render_pass,
         subpass = 0,
         basePipelineHandle = vk.Pipeline{}, // Optional
@@ -215,7 +215,17 @@ _vk_create_material :: proc(r: ^Vulkan_Renderer, program: ^Vulkan_Program, verte
         log.error("Failed to create graphics pipeline.")
         return nil, .Cannot_Create_Graphics_Pipeline
     }
+
+    append(&r.materials, material)
+
     return auto_cast material, .None
+}
+
+_vk_destroy_material :: proc(material: ^Vulkan_Material, r: Vulkan_Renderer) {
+    vk.DestroyPipeline(r.device, material.pipeline, nil)
+    vk.DestroyPipelineLayout(r.device, material.pipeline_layout, nil)
+    _vk_destroy_program(auto_cast material.program, r)
+    free(material)
 }
 
 vk_get_vertex_input_descriptions :: proc(vertex_layout: Vertex_Layout) -> (vk.VertexInputBindingDescription, []vk.VertexInputAttributeDescription) {
@@ -223,12 +233,14 @@ vk_get_vertex_input_descriptions :: proc(vertex_layout: Vertex_Layout) -> (vk.Ve
     stride: u32
     offset: u32
     for attribute, i in vertex_layout.attributes {
-        stride += cast(u32) get_vertex_attribute_type_size(attribute.type)
+        attribute_size := cast(u32) get_vertex_attribute_type_size(attribute.type) * cast(u32) attribute.number
+        stride += attribute_size
 
         attribute_descriptions[i].binding = 0
         attribute_descriptions[i].location = cast(u32) i
-        attribute_descriptions[i].format = vk_get_vertex_format(attribute.type, attribute.number)
+        attribute_descriptions[i].format = vk_get_vertex_format(attribute.type, attribute.number - 1)
         attribute_descriptions[i].offset = offset
+        offset += attribute_size
     }
 
     binding_description := vk.VertexInputBindingDescription {

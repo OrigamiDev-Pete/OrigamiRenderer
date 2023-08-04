@@ -14,7 +14,7 @@ Renderer_Base :: struct {
     framebuffer_resized: bool,
     skip_render: bool,
     meshes: [dynamic]^Mesh,
-    materials: map[string]Material,
+    materials: [dynamic]^Material,
 }
 
 Renderer :: union {
