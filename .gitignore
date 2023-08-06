@@ -2,5 +2,6 @@
 *.pdb
 *.obj
 *.text
+*.spall
 
 ols.json
