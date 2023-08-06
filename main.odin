@@ -9,6 +9,8 @@ import "core:slice"
 import op "OrigamiPlatform"
 import or "OrigamiRenderer"
 
+import "core:prof/spall"
+
 WIDTH :: 800
 HEIGHT :: 600
 
@@ -17,6 +19,7 @@ main :: proc() {
 	tracking_allocator: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&tracking_allocator, context.allocator)
 	context.allocator = mem.tracking_allocator(&tracking_allocator)
+
 
 	result := run()
 
@@ -43,7 +46,7 @@ run :: proc() -> int {
 	}
 
     setup_window_callbacks(window)
-	// setup_scene(renderer)
+	setup_scene(renderer)
 
 	for !op.window_should_close(window) {
 
@@ -85,13 +88,16 @@ get_platform_window_info :: proc(window: op.Window) -> (info: or.Window_Info) {
 
 setup_scene :: proc(renderer: ^or.Renderer) {
 
-	// triangle_vertices := []or.Vertex {
-	// 	{ {  0.0, -0.5 }, { 1, 0, 0 } },
-	// 	{ {  0.5,  0.5 }, { 0, 1, 0 } },
-	// 	{ { -0.5,  0.5 }, { 0, 0, 1 } },
-	// }
+	triangle_vertices := []or.Vertex {
+		{ {  0.0, -0.5 }, { 1, 1, 1 } },
+		{ {  0.5,  0.5 }, { 0, 1, 0 } },
+		{ { -0.5,  0.5 }, { 0, 0, 1 } },
+	}
 
-	// // or.load
+	vert_shader, _ := or.load_shader(renderer, "origamiRenderer/shaders/spirv/vert.spv")
+	frag_shader, _ := or.load_shader(renderer, "origamiRenderer/shaders/spirv/frag.spv")
+	program, _ := or.create_program(renderer, vert_shader, frag_shader)
+	material, _ := or.create_material(renderer, program, {{{ .Position, .Float32, 2 }, { .Colour, .Float32, 3 }}})
 
-	// triangle, _ := or.create_mesh(renderer, slice.clone(triangle_vertices))
+	triangle, _ := or.create_mesh(renderer, slice.clone(triangle_vertices), material)
 }

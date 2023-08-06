@@ -76,7 +76,7 @@ get_vertex_attribute_type_size :: proc(type: Vertex_Attribute_Type) -> int {
 }
 
 create_mesh :: proc(renderer: ^Renderer, vertices: []Vertex, material: ^Material = nil) -> (^Mesh, Error) {
-
+    trace(&spall_ctx, &spall_buffer, #procedure)
     if material == nil {
         // get default material
     }
@@ -91,6 +91,7 @@ create_mesh :: proc(renderer: ^Renderer, vertices: []Vertex, material: ^Material
 }
 
 destroy_mesh :: proc(mesh: ^Mesh, renderer: Renderer) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     switch r in renderer {
         case Vulkan_Renderer:
             _vk_destroy_mesh(auto_cast mesh, renderer.(Vulkan_Renderer))

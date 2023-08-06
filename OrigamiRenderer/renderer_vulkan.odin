@@ -11,6 +11,8 @@ import win32 "core:sys/windows"
 
 import vk "vendor:vulkan"
 
+import "core:prof/spall"
+
 max_frames_in_flight :: 2
 
 validation_layers :: []cstring {
@@ -104,6 +106,7 @@ Swap_Chain_Support_Details :: struct {
 
 
 _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     r.window_info = window_info
 
     init_resource_pool(&r.shaders, 128)
@@ -124,7 +127,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     create_swap_chain(r, window_info) or_return
     create_image_views(r) or_return
     create_render_pass(r) or_return
-    create_graphics_pipeline(r) or_return
+    // create_graphics_pipeline(r) or_return
     create_framebuffers(r) or_return
     create_command_pool(r) or_return
     create_command_buffers(r) or_return
@@ -134,6 +137,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
 }
 
 _vk_destroy_renderer :: proc(using r: ^Vulkan_Renderer) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     vk.DeviceWaitIdle(r.device)
     cleanup_swap_chain(r)
 
@@ -179,6 +183,7 @@ _vk_destroy_renderer :: proc(using r: ^Vulkan_Renderer) {
 }
 
 load_vkGetInstanceProcAddr :: proc() -> rawptr {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     vulkan_lib: dynlib.Library
     ok: bool
     when ODIN_OS == .Windows {
@@ -197,6 +202,7 @@ load_vkGetInstanceProcAddr :: proc() -> rawptr {
 }
 
 create_instance :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     if enable_validation_layers && !check_validation_layer_support() {
         log.error("Validation layers requested, but not available")
         return .Validation_Layer_Not_Supported
@@ -260,6 +266,7 @@ create_instance :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 }
 
 get_platform_extensions :: proc() -> [dynamic]cstring {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     when ODIN_OS == .Windows {
         extensions := make([dynamic]cstring, 2)
         extensions[0] = "VK_KHR_surface"
@@ -269,6 +276,7 @@ get_platform_extensions :: proc() -> [dynamic]cstring {
 }
 
 get_required_extensions :: proc() -> [dynamic]cstring {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     extensions_count: u32
     extensions := get_platform_extensions()
 
@@ -280,6 +288,7 @@ get_required_extensions :: proc() -> [dynamic]cstring {
 }
 
 create_surface :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     when ODIN_OS == .Windows {
         using win32
         create_info := vk.Win32SurfaceCreateInfoKHR {
@@ -299,6 +308,7 @@ create_surface :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: V
 }
 
 pick_physical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     device_count: u32
     vk.EnumeratePhysicalDevices(r.instance, &device_count, nil)
     if device_count == 0 {
@@ -327,6 +337,7 @@ pick_physical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 }
 
 is_device_suitable :: proc(r: Vulkan_Renderer, device: vk.PhysicalDevice) -> bool {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     indices := find_queue_families(r, device)
     indices_complete := queue_family_complete(indices)
 
@@ -344,6 +355,7 @@ is_device_suitable :: proc(r: Vulkan_Renderer, device: vk.PhysicalDevice) -> boo
 }
 
 check_device_extension_support :: proc(device: vk.PhysicalDevice) -> bool {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     extensions_count: u32
     vk.EnumerateDeviceExtensionProperties(device, nil, &extensions_count, nil)
 
@@ -368,6 +380,7 @@ check_device_extension_support :: proc(device: vk.PhysicalDevice) -> bool {
 }
 
 check_validation_layer_support :: proc() -> bool {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     layer_count: u32
     vk.EnumerateInstanceLayerProperties(&layer_count, nil)
 
@@ -397,6 +410,7 @@ check_validation_layer_support :: proc() -> bool {
 }
 
 find_queue_families :: proc(r: Vulkan_Renderer, device: vk.PhysicalDevice) -> Queue_Family_Indices {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     indices: Queue_Family_Indices
 
     queue_family_count: u32
@@ -425,6 +439,7 @@ find_queue_families :: proc(r: Vulkan_Renderer, device: vk.PhysicalDevice) -> Qu
 }
 
 query_swap_chain_support :: proc(r: Vulkan_Renderer, device: vk.PhysicalDevice) -> Swap_Chain_Support_Details {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     details: Swap_Chain_Support_Details
 
     vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(device, r.surface, &details.capabilites)
@@ -449,13 +464,15 @@ query_swap_chain_support :: proc(r: Vulkan_Renderer, device: vk.PhysicalDevice) 
 }
 
 delete_swap_chain_support_details :: proc(details: Swap_Chain_Support_Details) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     delete(details.formats)
     delete(details.present_modes)
 }
 
 choose_swap_chain_surface_format :: proc(available_formats: []vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     for available_format in available_formats {
-        if available_format.format == .B8G8R8_SRGB && available_format.colorSpace == .COLORSPACE_SRGB_NONLINEAR {
+        if available_format.format == .B8G8R8A8_SRGB && available_format.colorSpace == .COLORSPACE_SRGB_NONLINEAR {
             return available_format
         }
     }
@@ -464,6 +481,7 @@ choose_swap_chain_surface_format :: proc(available_formats: []vk.SurfaceFormatKH
 }
 
 choose_swap_chain_present_mode :: proc(available_present_modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     for available_present_mode in available_present_modes {
         if available_present_mode == .MAILBOX {
             return available_present_mode
@@ -474,6 +492,7 @@ choose_swap_chain_present_mode :: proc(available_present_modes: []vk.PresentMode
 }
 
 choose_swap_extent :: proc(capabilities: vk.SurfaceCapabilitiesKHR, info: Window_Info) -> vk.Extent2D {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     if capabilities.currentExtent.width != max(u32) {
         return capabilities.currentExtent
     } else {
@@ -490,6 +509,7 @@ choose_swap_extent :: proc(capabilities: vk.SurfaceCapabilitiesKHR, info: Window
 }
 
 create_logical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     indices := find_queue_families(r^, r.physical_device)
 
     unique_queue_families := make(map[u32]struct{}, 0, context.temp_allocator)
@@ -539,6 +559,7 @@ create_logical_device :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 }
 
 create_swap_chain :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     swap_chain_support := query_swap_chain_support(r^, r.physical_device)
     defer delete_swap_chain_support_details(swap_chain_support)
 
@@ -591,11 +612,8 @@ create_swap_chain :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     return
 }
 
-// _vk_resize_window :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) {
-//     recreate_swap_chain(r, window_info)
-// }
-
 cleanup_swap_chain :: proc(r: ^Vulkan_Renderer) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     for framebuffer in r.swap_chain_framebuffers {
         vk.DestroyFramebuffer(r.device, framebuffer, nil)
     }
@@ -612,6 +630,7 @@ cleanup_swap_chain :: proc(r: ^Vulkan_Renderer) {
 }
 
 recreate_swap_chain :: proc(r: ^Vulkan_Renderer) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     update_window_info_size(&r.window_info)
     vk.DeviceWaitIdle(r.device)
 
@@ -635,6 +654,7 @@ recreate_swap_chain :: proc(r: ^Vulkan_Renderer) {
 }
 
 create_image_views :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     r.swap_chain_image_views = make([]vk.ImageView, len(r.swap_chain_images))
 
     for i in 0..<len(r.swap_chain_images) {
@@ -665,6 +685,7 @@ create_image_views :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 }
 
 create_render_pass :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     colour_attachment := vk.AttachmentDescription {
         format = r.swap_chain_image_format,
         samples = { ._1 },
@@ -715,6 +736,7 @@ create_render_pass :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 }
 
 create_graphics_pipeline :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     vert_shader_code, ok1 := os.read_entire_file_from_filename("origamiRenderer/shaders/spirv/vert.spv") 
     frag_shader_code, ok2 := os.read_entire_file_from_filename("origamiRenderer/shaders/spirv/frag.spv")
     defer delete(vert_shader_code)
@@ -753,6 +775,7 @@ create_graphics_pipeline :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 }
 
 create_framebuffers :: proc (r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     resize(&r.swap_chain_framebuffers, len(r.swap_chain_image_views))
 
     for &attachment, i in r.swap_chain_image_views {
@@ -776,6 +799,7 @@ create_framebuffers :: proc (r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 }
 
 create_command_pool :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     queue_family_indices := find_queue_families(r^, r.physical_device)
 
     pool_info := vk.CommandPoolCreateInfo {
@@ -793,6 +817,7 @@ create_command_pool :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 }
 
 create_command_buffers :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     r.command_buffers = make([]vk.CommandBuffer, max_frames_in_flight)
 
     alloc_info := vk.CommandBufferAllocateInfo {
@@ -811,6 +836,7 @@ create_command_buffers :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 }
 
 record_command_buffer :: proc(r: Vulkan_Renderer, command_buffer: vk.CommandBuffer, image_index: u32) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     begin_info := vk.CommandBufferBeginInfo {
         sType = .COMMAND_BUFFER_BEGIN_INFO,
         flags = {}, // Optional
@@ -874,6 +900,7 @@ record_command_buffer :: proc(r: Vulkan_Renderer, command_buffer: vk.CommandBuff
 }
 
 create_sync_objects :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     semaphore_info := vk.SemaphoreCreateInfo {
         sType = .SEMAPHORE_CREATE_INFO,
     }
@@ -900,6 +927,7 @@ create_sync_objects :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 }
 
 get_binding_description :: proc() -> vk.VertexInputBindingDescription {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     binding_description := vk.VertexInputBindingDescription {
         binding = 0,
         stride = size_of(Vertex),
@@ -910,6 +938,7 @@ get_binding_description :: proc() -> vk.VertexInputBindingDescription {
 }
 
 get_attribute_descriptions :: proc() -> [2]vk.VertexInputAttributeDescription {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     attribute_descriptions := [2]vk.VertexInputAttributeDescription {
         { 
             binding = 0,
@@ -929,6 +958,7 @@ get_attribute_descriptions :: proc() -> [2]vk.VertexInputAttributeDescription {
 }
 
 find_memory_type :: proc(r: Vulkan_Renderer, type_filter: u32, properties: vk.MemoryPropertyFlags) -> (u32, Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     memory_properties: vk.PhysicalDeviceMemoryProperties
     vk.GetPhysicalDeviceMemoryProperties(r.physical_device, &memory_properties)
 
@@ -943,6 +973,7 @@ find_memory_type :: proc(r: Vulkan_Renderer, type_filter: u32, properties: vk.Me
 }
 
 _vk_render :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     if r.skip_render do return
 
     vk.WaitForFences(r.device, 1, &r.in_flight_fences[r.current_frame], true, max(u64))
@@ -1009,6 +1040,7 @@ _vk_render :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 }
 
 setup_debug_messenger :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     if !enable_validation_layers do return
 
     create_info: vk.DebugUtilsMessengerCreateInfoEXT
@@ -1024,6 +1056,7 @@ setup_debug_messenger :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
 
 debug_callback :: proc "system" (messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT, messageTypes: vk.DebugUtilsMessageTypeFlagsEXT, pCallbackData: ^vk.DebugUtilsMessengerCallbackDataEXT, pUserData: rawptr) -> b32 {
     context = ctx^
+    trace(&spall_ctx, &spall_buffer, #procedure)
 
     if .ERROR in messageSeverity {
         log.errorf("Validation layer: %s", pCallbackData.pMessage)
@@ -1037,6 +1070,7 @@ debug_callback :: proc "system" (messageSeverity: vk.DebugUtilsMessageSeverityFl
 }
 
 init_debug_messenger_create_info :: proc(info: ^vk.DebugUtilsMessengerCreateInfoEXT) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     info.sType = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT
     info.messageSeverity = { .WARNING, .ERROR }
     info.messageType = { .GENERAL, .VALIDATION, .PERFORMANCE }
@@ -1045,6 +1079,7 @@ init_debug_messenger_create_info :: proc(info: ^vk.DebugUtilsMessengerCreateInfo
 }
 
 queue_family_complete :: proc(queue_family: Queue_Family_Indices) -> bool {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     _, ok1 := queue_family.graphics_family.?
     _, ok2 := queue_family.present_family.?
     return ok1 && ok2

@@ -2,8 +2,21 @@ package OrigamiRenderer
 
 import "core:runtime"
 import "core:math/linalg/glsl"
+
 import vk "vendor:vulkan"
 import win32 "core:sys/windows"
+
+import "core:prof/spall"
+spall_ctx: spall.Context
+spall_buffer: spall.Buffer
+spall_backing_buffer: []u8
+
+TRACE :: #config(TRACE, false)
+when TRACE {
+    trace :: spall.SCOPED_EVENT
+} else {
+    trace :: proc(_: ^spall.Context, _: ^spall.Buffer, _: string) {}
+}
 
 Colour3 :: [3]f32
 Colour4 :: [4]f32
@@ -63,6 +76,7 @@ renderer: ^Renderer
 ctx: ^runtime.Context
 
 create_renderer :: proc(type: Render_API) -> ^Renderer {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     switch type {
         case .Vulkan:
             renderer = new(Renderer)
@@ -76,6 +90,13 @@ create_renderer :: proc(type: Render_API) -> ^Renderer {
 init_renderer :: proc(renderer: ^Renderer, window_info: Window_Info) -> (err: Error) {
     ctx = new_clone(context)
 
+    when TRACE {
+        spall_ctx = spall.context_create("renderer.spall")
+        spall_backing_buffer = make([]u8, spall.BUFFER_DEFAULT_SIZE)
+        spall_buffer = spall.buffer_create(spall_backing_buffer)
+        spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, #procedure)
+    }
+
     r := cast(^Renderer_Base) renderer
     r.clear_colour = { 0, 0, 0, 1.0 }
 
@@ -87,6 +108,7 @@ init_renderer :: proc(renderer: ^Renderer, window_info: Window_Info) -> (err: Er
 }
 
 render :: proc(renderer: ^Renderer) -> (err: Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     switch r in renderer {
         case Vulkan_Renderer:
             return _vk_render(auto_cast renderer)
@@ -95,6 +117,7 @@ render :: proc(renderer: ^Renderer) -> (err: Error) {
 }
 
 destroy_renderer :: proc(renderer: ^Renderer) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     defer free(ctx)
     switch r in renderer {
         case Vulkan_Renderer:
@@ -106,9 +129,16 @@ destroy_renderer :: proc(renderer: ^Renderer) {
     delete(r.materials)
 
     free(renderer)
+
+    when TRACE {
+        spall.buffer_destroy(&spall_ctx, &spall_buffer)
+        spall.context_destroy(&spall_ctx)
+        delete(spall_backing_buffer)
+    }
 }
 
 update_window_info_size :: proc(window_info: ^Window_Info) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     when ODIN_OS == .Windows {
         rect: win32.RECT
         wi, ok := &window_info.(Win32_Window_Info)

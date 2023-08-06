@@ -25,6 +25,7 @@ vk_vertex_attribute_format_map := [Vertex_Attribute_Type][]vk.Format {
 }
 
 _vk_create_mesh :: proc(r: ^Vulkan_Renderer, vertices: []Vertex, material: ^Vulkan_Material) -> (m: ^Vulkan_Mesh, err: Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     mesh := new(Mesh)
     mesh^ = Vulkan_Mesh {
         vertices = vertices,
@@ -73,6 +74,7 @@ _vk_create_mesh :: proc(r: ^Vulkan_Renderer, vertices: []Vertex, material: ^Vulk
 }
 
 _vk_destroy_mesh :: proc(mesh: ^Vulkan_Mesh, r: Vulkan_Renderer) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     vk.DestroyBuffer(r.device, mesh.vertex_buffer, nil)
     vk.FreeMemory(r.device, mesh.vertex_buffer_memory, nil)
     delete(mesh.vertices)

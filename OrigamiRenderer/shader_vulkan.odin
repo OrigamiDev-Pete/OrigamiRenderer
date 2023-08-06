@@ -22,7 +22,9 @@ Vulkan_Material :: struct {
 }
 
 _vk_create_shader :: proc(r: ^Vulkan_Renderer, code: []u8) -> (^Vulkan_Shader, Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     module, error := vk_create_shader_module(r^, code)
+    defer when !ODIN_DEBUG do delete(code)
     if error != nil do return nil, .Cannot_Create_Shader_Module
 
     shader := new(Shader)
@@ -35,12 +37,16 @@ _vk_create_shader :: proc(r: ^Vulkan_Renderer, code: []u8) -> (^Vulkan_Shader, V
 }
 
 _vk_destroy_shader :: proc(r: Vulkan_Renderer, shader: ^Vulkan_Shader) {
-    delete(shader.code)
+    trace(&spall_ctx, &spall_buffer, #procedure)
+    when ODIN_DEBUG {
+        delete(shader.code)
+    }
     vk.DestroyShaderModule(r.device, shader.module, nil)
     free(shader)
 }
 
 vk_create_shader_module :: proc(r: Vulkan_Renderer, code: []u8) -> (vk.ShaderModule, Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     create_info := vk.ShaderModuleCreateInfo {
         sType = .SHADER_MODULE_CREATE_INFO,
         codeSize = len(code),
@@ -57,6 +63,7 @@ vk_create_shader_module :: proc(r: Vulkan_Renderer, code: []u8) -> (vk.ShaderMod
 }
 
 _vk_create_program :: proc(r: ^Vulkan_Renderer, vertex_shader, fragment_shader: ^Vulkan_Shader) -> (^Vulkan_Program, Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     program := new(Program)
 
     program^ = Vulkan_Program{
@@ -68,14 +75,19 @@ _vk_create_program :: proc(r: ^Vulkan_Renderer, vertex_shader, fragment_shader: 
 }
 
 _vk_destroy_program :: proc(program: ^Vulkan_Program, r: Vulkan_Renderer, ) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     _vk_destroy_shader(r, auto_cast program.vertex_shader)
     _vk_destroy_shader(r, auto_cast program.fragment_shader)
+    free(program)
 }
 
 _vk_create_material :: proc(r: ^Vulkan_Renderer, program: ^Vulkan_Program, vertex_layout: Vertex_Layout = default_vertex_layout) -> (^Vulkan_Material, Vulkan_Error) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     material := new(Material)
 
-    material^ = Vulkan_Material{}
+    material^ = Vulkan_Material {
+        program = auto_cast program
+    }
     m := &material.(Vulkan_Material)
 
     vert_shader_stage_info := vk.PipelineShaderStageCreateInfo {
@@ -222,6 +234,7 @@ _vk_create_material :: proc(r: ^Vulkan_Renderer, program: ^Vulkan_Program, verte
 }
 
 _vk_destroy_material :: proc(material: ^Vulkan_Material, r: Vulkan_Renderer) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     vk.DestroyPipeline(r.device, material.pipeline, nil)
     vk.DestroyPipelineLayout(r.device, material.pipeline_layout, nil)
     _vk_destroy_program(auto_cast material.program, r)
@@ -229,6 +242,7 @@ _vk_destroy_material :: proc(material: ^Vulkan_Material, r: Vulkan_Renderer) {
 }
 
 vk_get_vertex_input_descriptions :: proc(vertex_layout: Vertex_Layout) -> (vk.VertexInputBindingDescription, []vk.VertexInputAttributeDescription) {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     attribute_descriptions := make([]vk.VertexInputAttributeDescription, len(vertex_layout.attributes), context.temp_allocator)
     stride: u32
     offset: u32
@@ -253,5 +267,6 @@ vk_get_vertex_input_descriptions :: proc(vertex_layout: Vertex_Layout) -> (vk.Ve
 }
 
 vk_get_vertex_format :: proc(type: Vertex_Attribute_Type, number: u8) -> vk.Format {
+    trace(&spall_ctx, &spall_buffer, #procedure)
     return vk_vertex_attribute_format_map[type][number]
 }
