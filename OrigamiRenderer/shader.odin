@@ -40,6 +40,8 @@ create_shader :: proc(renderer: ^Renderer, code: []u8) -> (^Shader, Error) {
         case Vulkan_Renderer:
             shader, err := _vk_create_shader(&r, code)
             return auto_cast shader, err
+        case OpenGL_Renderer:
+            return nil, nil
         case:
             return nil, .Invalid_Renderer
     }
@@ -50,12 +52,15 @@ destroy_shader :: proc(renderer: Renderer, shader: ^Shader) {
     switch &r in renderer {
         case Vulkan_Renderer:
             _vk_destroy_shader(r, auto_cast shader)
+        case OpenGL_Renderer:
+            return
     }
 }
 
 load_shader :: proc(renderer: ^Renderer, path: string) -> (^Shader, Error) {
     trace(&spall_ctx, &spall_buffer, #procedure)
     code, ok := os.read_entire_file_from_filename(path)
+    defer when !ODIN_DEBUG do delete(code)
     if !ok do return nil, .Cannot_Load_Shader
 
     return create_shader(renderer, code)
@@ -67,6 +72,8 @@ create_program :: proc(renderer: ^Renderer, vertex_shader, fragment_shader: ^Sha
         case Vulkan_Renderer:
             program, err := _vk_create_program(&r, auto_cast vertex_shader, auto_cast fragment_shader)
             return auto_cast program, err
+        case OpenGL_Renderer:
+            return nil, nil
         case:
             return nil, .Invalid_Renderer
     }
@@ -78,6 +85,8 @@ create_material :: proc(renderer: ^Renderer, program: ^Program, vertex_layout: V
         case Vulkan_Renderer:
             material, err := _vk_create_material(&r, auto_cast program, vertex_layout)
             return auto_cast material, err
+        case OpenGL_Renderer:
+            return nil, nil
         case:
             return nil, .Invalid_Renderer
     }

@@ -23,7 +23,6 @@ Vulkan_Material :: struct {
 _vk_create_shader :: proc(r: ^Vulkan_Renderer, code: []u8) -> (^Vulkan_Shader, Vulkan_Error) {
     trace(&spall_ctx, &spall_buffer, #procedure)
     module, error := vk_create_shader_module(r^, code)
-    defer when !ODIN_DEBUG do delete(code)
     if error != nil do return nil, .Cannot_Create_Shader_Module
 
     shader := new(Shader)
@@ -65,7 +64,7 @@ _vk_create_program :: proc(r: ^Vulkan_Renderer, vertex_shader, fragment_shader: 
     trace(&spall_ctx, &spall_buffer, #procedure)
     program := new(Program)
 
-    program^ = Vulkan_Program{
+    program^ = Vulkan_Program {
         vertex_shader = auto_cast vertex_shader,
         fragment_shader = auto_cast fragment_shader,
     }

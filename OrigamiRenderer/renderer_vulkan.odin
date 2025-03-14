@@ -132,6 +132,7 @@ _vk_init_renderer :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err
     create_command_buffers(r) or_return
     create_sync_objects(r) or_return
 
+    log.debug("Vulkan 1.0 Renderer Initialised.")
     return
 }
 
@@ -291,7 +292,7 @@ create_surface :: proc(r: ^Vulkan_Renderer, window_info: Window_Info) -> (err: V
         using win32
         create_info := vk.Win32SurfaceCreateInfoKHR {
             sType = .WIN32_SURFACE_CREATE_INFO_KHR,
-            hwnd = cast(HWND) window_info.(Win32_Window_Info).hwnd,
+            hwnd = window_info.(Win32_Window_Info).hwnd,
             hinstance = cast(HANDLE) GetModuleHandleA(nil),
         }
 
@@ -622,6 +623,7 @@ cleanup_swap_chain :: proc(r: ^Vulkan_Renderer) {
 
     vk.DestroySwapchainKHR(r.device, r.swap_chain, nil)
 
+    // Note(Pete: There's a bug here. Should I be deleting these every time?
     delete(r.swap_chain_images)
     delete(r.swap_chain_image_views)
     delete(r.swap_chain_framebuffers)

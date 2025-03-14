@@ -38,7 +38,7 @@ run :: proc() -> int {
 	}
 	defer op.destroy_window(window)
 
-	renderer : ^or.Renderer = or.create_renderer(.Vulkan)
+	renderer : ^or.Renderer = or.create_renderer(.OpenGL)
 	defer or.destroy_renderer(renderer)
 	if err := or.init_renderer(renderer, get_platform_window_info(window^)); err != nil {
 		log.error(err)
@@ -65,6 +65,7 @@ setup_window_callbacks :: proc(window: ^op.Window) {
 		log.debug("Window resized to ", width, "x", height)
 		r := cast(^or.Renderer_Base) or.renderer
 		r.framebuffer_resized = true
+		or.render(or.renderer)
 	})
 
 	op.window_set_on_close_callback(window, proc(window: ^op.Window) {

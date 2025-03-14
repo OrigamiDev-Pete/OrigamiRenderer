@@ -104,7 +104,7 @@ _window_should_close :: proc(window: ^Win32_Window) -> bool {
         win32.TranslateMessage(&msg)
         win32.DispatchMessageW(&msg)
     }
-    return cast(bool) should_quit
+    return should_quit
 }
 
 _get_window_size :: proc(window: Win32_Window) -> (int, int) {

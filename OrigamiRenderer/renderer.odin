@@ -30,6 +30,7 @@ Renderer_Base :: struct {
 
 Renderer :: union {
     Vulkan_Renderer,
+    OpenGL_Renderer
 }
 
 Window_Info :: union {
@@ -49,7 +50,7 @@ Win32_Window_Info :: struct {
 
 Render_API :: enum {
     Vulkan,
-    // OpenGL,
+    OpenGL,
     // D3D11,
     // D3D12,
     // Metal,
@@ -80,6 +81,10 @@ create_renderer :: proc(type: Render_API) -> ^Renderer {
             renderer = new(Renderer)
             renderer^ = Vulkan_Renderer{}
             return renderer
+        case .OpenGL:
+            renderer = new(Renderer)
+            renderer^ = OpenGL_Renderer{}
+            return renderer
         case:
             return renderer
     }
@@ -101,6 +106,8 @@ init_renderer :: proc(renderer: ^Renderer, window_info: Window_Info) -> (err: Er
     switch r in renderer {
         case Vulkan_Renderer:
             return _vk_init_renderer(auto_cast renderer, window_info)
+        case OpenGL_Renderer:
+            return _gl_init_renderer(auto_cast renderer, window_info)
     }
     return
 }
@@ -110,6 +117,8 @@ render :: proc(renderer: ^Renderer) -> (err: Error) {
     switch r in renderer {
         case Vulkan_Renderer:
             return _vk_render(auto_cast renderer)
+        case OpenGL_Renderer:
+            return _gl_render(auto_cast renderer)
     }
     return
 }
@@ -120,6 +129,8 @@ destroy_renderer :: proc(renderer: ^Renderer) {
     switch r in renderer {
         case Vulkan_Renderer:
             _vk_destroy_renderer(auto_cast renderer)
+        case OpenGL_Renderer:
+            _gl_destroy_renderer(auto_cast renderer)
     }
 
     r := cast(^Renderer_Base) renderer
