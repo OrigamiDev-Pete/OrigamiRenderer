@@ -81,7 +81,7 @@ create_mesh :: proc(renderer: ^Renderer, vertices: []Vertex, material: ^Material
         // get default material
     }
 
-    switch r in renderer {
+    switch &r in renderer {
         case Vulkan_Renderer:
             mesh, err := _vk_create_mesh(auto_cast &r, vertices, auto_cast material)
             return auto_cast mesh, err

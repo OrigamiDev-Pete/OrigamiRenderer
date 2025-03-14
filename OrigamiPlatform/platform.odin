@@ -1,6 +1,6 @@
 package OrigamiPlatform
 
-import "core:runtime"
+import "base:runtime"
 import win32 "core:sys/windows"
 
 @(private)
@@ -54,14 +54,14 @@ get_window_size :: proc(window: Window) -> (int, int) {
 }
 
 window_set_on_resize_callback :: proc(window: ^Window, callback: #type proc(window: ^Window, width, height: u16)) {
-    switch w in window {
+    switch &w in window {
         case Win32_Window:
             w.on_resize = callback
     }
 }
 
 window_set_on_close_callback :: proc(window: ^Window, callback: #type proc(window: ^Window)) {
-    switch w in window {
+    switch &w in window {
         case Win32_Window:
             w.on_close = callback
     }

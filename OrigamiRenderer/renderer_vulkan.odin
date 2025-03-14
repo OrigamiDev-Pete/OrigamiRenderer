@@ -1,10 +1,9 @@
-//+private
+#+private
 package OrigamiRenderer
 
 import "core:dynlib"
 import "core:log"
 import "core:os"
-import "core:runtime"
 import "core:slice"
 import "core:strings"
 import win32 "core:sys/windows"
@@ -277,7 +276,6 @@ get_platform_extensions :: proc() -> [dynamic]cstring {
 
 get_required_extensions :: proc() -> [dynamic]cstring {
     trace(&spall_ctx, &spall_buffer, #procedure)
-    extensions_count: u32
     extensions := get_platform_extensions()
 
     if enable_validation_layers {
@@ -366,7 +364,7 @@ check_device_extension_support :: proc(device: vk.PhysicalDevice) -> bool {
     for extension_name in device_extensions {
         extension_found := false
 
-        for extension in &available_extensions {
+        for &extension in &available_extensions {
             if strings.compare(string(extension_name), string(cstring(&extension.extensionName[0]))) == 0 {
                 extension_found = true
                 break
@@ -396,7 +394,7 @@ check_validation_layer_support :: proc() -> bool {
     for layer_name in validation_layers {
         layer_found := false
 
-        for layer_property in &available_layers {
+        for &layer_property in &available_layers {
             if strings.compare(string(layer_name), string(cstring(&layer_property.layerName[0]))) == 0 {
                 layer_found = true
                 break

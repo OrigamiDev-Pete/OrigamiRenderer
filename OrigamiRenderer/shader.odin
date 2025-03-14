@@ -36,7 +36,7 @@ Program_Handle :: Resource_Handle
 
 create_shader :: proc(renderer: ^Renderer, code: []u8) -> (^Shader, Error) {
     trace(&spall_ctx, &spall_buffer, #procedure)
-    switch r in renderer {
+    switch &r in renderer {
         case Vulkan_Renderer:
             shader, err := _vk_create_shader(&r, code)
             return auto_cast shader, err
@@ -47,7 +47,7 @@ create_shader :: proc(renderer: ^Renderer, code: []u8) -> (^Shader, Error) {
 
 destroy_shader :: proc(renderer: Renderer, shader: ^Shader) {
     trace(&spall_ctx, &spall_buffer, #procedure)
-    switch r in renderer {
+    switch &r in renderer {
         case Vulkan_Renderer:
             _vk_destroy_shader(r, auto_cast shader)
     }
@@ -63,7 +63,7 @@ load_shader :: proc(renderer: ^Renderer, path: string) -> (^Shader, Error) {
 
 create_program :: proc(renderer: ^Renderer, vertex_shader, fragment_shader: ^Shader) -> (^Program, Error) {
     trace(&spall_ctx, &spall_buffer, #procedure)
-    switch r in renderer {
+    switch &r in renderer {
         case Vulkan_Renderer:
             program, err := _vk_create_program(&r, auto_cast vertex_shader, auto_cast fragment_shader)
             return auto_cast program, err
@@ -74,7 +74,7 @@ create_program :: proc(renderer: ^Renderer, vertex_shader, fragment_shader: ^Sha
 
 create_material :: proc(renderer: ^Renderer, program: ^Program, vertex_layout: Vertex_Layout = default_vertex_layout) -> (^Material, Error) {
     trace(&spall_ctx, &spall_buffer, #procedure)
-    switch r in renderer {
+    switch &r in renderer {
         case Vulkan_Renderer:
             material, err := _vk_create_material(&r, auto_cast program, vertex_layout)
             return auto_cast material, err

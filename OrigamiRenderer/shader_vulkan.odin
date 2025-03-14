@@ -1,7 +1,6 @@
-//+private
+#+private
 package OrigamiRenderer
 
-import "core:hash"
 import "core:log"
 
 import vk "vendor:vulkan"
@@ -145,7 +144,9 @@ _vk_create_material :: proc(r: ^Vulkan_Renderer, program: ^Vulkan_Program, verte
     viewport_state := vk.PipelineViewportStateCreateInfo {
         sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         viewportCount = 1,
+        pViewports = &viewport,
         scissorCount = 1,
+        pScissors = &scissor,
     }
 
     rasterizer := vk.PipelineRasterizationStateCreateInfo {

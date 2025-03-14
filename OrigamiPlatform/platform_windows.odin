@@ -1,9 +1,9 @@
-//+build windows
-//+private
+#+build windows
+#+private
 package OrigamiPlatform
 
 import "core:fmt"
-import "core:runtime"
+import "base:runtime"
 import "core:unicode/utf16"
 import win32 "core:sys/windows"
 

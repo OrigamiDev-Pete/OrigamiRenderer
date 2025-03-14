@@ -1,9 +1,7 @@
 package OrigamiRenderer
 
-import "core:runtime"
-import "core:math/linalg/glsl"
+import "base:runtime"
 
-import vk "vendor:vulkan"
 import win32 "core:sys/windows"
 
 import "core:prof/spall"
