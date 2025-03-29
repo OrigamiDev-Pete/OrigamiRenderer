@@ -18,6 +18,8 @@ Window_Base :: struct {
 Win32_Window :: struct {
     using base: Window_Base,
     window_handle: win32.HWND,
+    device_context: win32.HDC,
+    render_context: win32.HGLRC
 }
 
 Window :: union {
@@ -34,6 +36,16 @@ Window_Error :: enum u8 {
     None,
     Failed,
     OS_Not_Supported,
+}
+
+Render_API :: enum {
+    Vulkan,
+    OpenGL,
+    // D3D11,
+    // D3D12,
+    // Metal,
+    // WebGL,
+    // WebGPU,
 }
 
 

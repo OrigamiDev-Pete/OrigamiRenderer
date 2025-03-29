@@ -20,7 +20,7 @@ Vulkan_Material :: struct {
     pipeline: vk.Pipeline,
 }
 
-_vk_create_shader :: proc(r: ^Vulkan_Renderer, code: []u8) -> (^Vulkan_Shader, Vulkan_Error) {
+_vk_create_shader :: proc(r: ^Vulkan_Renderer, code: []u8, type: Shader_Type) -> (^Vulkan_Shader, Vulkan_Error) {
     trace(&spall_ctx, &spall_buffer, #procedure)
     module, error := vk_create_shader_module(r^, code)
     if error != nil do return nil, .Cannot_Create_Shader_Module
@@ -29,6 +29,7 @@ _vk_create_shader :: proc(r: ^Vulkan_Renderer, code: []u8) -> (^Vulkan_Shader, V
     shader^ = Vulkan_Shader { 
         code = code,
         module = module,
+        type = type
     }
 
     return auto_cast shader, .None

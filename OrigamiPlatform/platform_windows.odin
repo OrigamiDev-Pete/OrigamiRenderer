@@ -2,17 +2,22 @@
 #+private
 package OrigamiPlatform
 
+import "core:c"
 import "core:fmt"
+import "core:log"
 import "base:runtime"
+import "core:strings"
 import "core:unicode/utf16"
 import win32 "core:sys/windows"
 
-origamiWindow: ^Win32_Window = nil
+import gl "vendor:OpenGL"
+
+origami_window: ^Win32_Window = nil
 
 CLASS_NAME :: "Origami Window Class"
 
 window_proc :: proc "stdcall" (hWnd: win32.HWND, msg: win32.UINT, wParam: win32.WPARAM, lParam: win32.LPARAM) -> win32.LRESULT {
-    context = origamiWindow.odin_context^
+    context = origami_window.odin_context^
 
     switch msg {
         case win32.WM_SIZE: {
@@ -21,8 +26,8 @@ window_proc :: proc "stdcall" (hWnd: win32.HWND, msg: win32.UINT, wParam: win32.
             }
             width := win32.LOWORD(cast(win32.DWORD)lParam)
             height := win32.HIWORD(cast(win32.DWORD)lParam)
-            if origamiWindow.callbacks.on_resize != nil {
-                origamiWindow.callbacks.on_resize(cast(^Window) origamiWindow, width, height)
+            if origami_window.callbacks.on_resize != nil {
+                origami_window.callbacks.on_resize(cast(^Window) origami_window, width, height)
             }
 
             return 0
@@ -31,7 +36,7 @@ window_proc :: proc "stdcall" (hWnd: win32.HWND, msg: win32.UINT, wParam: win32.
             when ODIN_DEBUG {
                 fmt.println("WM_CLOSE")
             }
-            if origamiWindow.callbacks.on_close != nil do origamiWindow.callbacks.on_close(cast(^Window) origamiWindow)
+            if origami_window.callbacks.on_close != nil do origami_window.callbacks.on_close(cast(^Window) origami_window)
             win32.DestroyWindow(hWnd)
             return 0
         }
@@ -48,7 +53,7 @@ window_proc :: proc "stdcall" (hWnd: win32.HWND, msg: win32.UINT, wParam: win32.
     }
 }
 
-_create_window :: proc(width, height: i32, title: string, x, y: i32) -> (^Window, Window_Error) {
+_create_window :: proc(width, height: i32, title: string, x, y: i32, should_create_context := true) -> (^Window, Window_Error) {
     // Register the window class.
     class_name := win32.L(CLASS_NAME)
 
@@ -75,7 +80,7 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32) -> (^Window
         callbacks = {},
         odin_context = ctx,
     }
-    origamiWindow = auto_cast window
+    origami_window = auto_cast window
 
     hWnd := win32.CreateWindowW(wc.lpszClassName, &utf16_title[0], win32.WS_OVERLAPPEDWINDOW, x, y, width, height, nil, nil, wc.hInstance, nil)
 
@@ -85,6 +90,8 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32) -> (^Window
 
     w := &window.(Win32_Window)
     w.window_handle = hWnd
+
+    if should_create_context do create_context()
 
     win32.ShowWindow(hWnd, win32.SW_SHOWDEFAULT)
 
@@ -112,4 +119,107 @@ _get_window_size :: proc(window: Win32_Window) -> (int, int) {
     win32.GetClientRect(window.window_handle, &rect)
 
     return  int(rect.right), int(rect.bottom)
+}
+
+create_context :: proc() -> (err: Window_Error) {
+    // Create dummy context to load OpenGL 
+
+    pixel_format_descriptor := win32.PIXELFORMATDESCRIPTOR {
+        nSize = size_of(win32.PIXELFORMATDESCRIPTOR),
+        nVersion = 1,
+        dwFlags = win32.PFD_DRAW_TO_WINDOW | win32.PFD_SUPPORT_OPENGL | win32.PFD_DOUBLEBUFFER,
+        iPixelType = win32.PFD_TYPE_RGBA,
+        cColorBits = 32,
+        cDepthBits = 24,
+        cStencilBits = 8,
+        iLayerType = win32.PFD_MAIN_PLANE
+    }
+
+    device_context := win32.GetDC(origami_window.window_handle)
+
+    pixel_format := win32.ChoosePixelFormat(device_context, &pixel_format_descriptor)
+    win32.SetPixelFormat(device_context, pixel_format, &pixel_format_descriptor)
+
+    render_context := win32.wglCreateContext(device_context)
+    if render_context == nil {
+        log.error("Could not create dummy render context")
+        return
+    }
+    win32.wglMakeCurrent(device_context, render_context)
+
+    gl.load_1_0(win32.gl_set_proc_address)
+    // win32.gl_set_proc_address(&gl.impl_GetError, "glGetError")
+    // win32.gl_set_proc_address(&gl.impl_GetIntegerv, "glGetIntegerv")
+    version: i32
+    gl.GetIntegerv(gl.MAJOR_VERSION, &version)
+
+    // If we only acquire a 1.0 context we need to create a newer context directly.
+    if (version <= 1) {
+        win32.gl_set_proc_address(&win32.wglGetExtensionsStringARB, "wglGetExtensionsStringARB")
+        available_extensions_string := win32.wglGetExtensionsStringARB(device_context)
+
+        available_extensions := strings.split(string(available_extensions_string), " ")
+        defer delete(available_extensions)
+        for extension in available_extensions {
+            switch extension {
+                case "WGL_ARB_create_context":
+                    win32.gl_set_proc_address(&win32.wglCreateContextAttribsARB, "wglCreateContextAttribsARB")
+                case "WGL_EXT_swap_control":
+                    win32.gl_set_proc_address(&win32.wglSwapIntervalEXT, "wglSwapIntervalEXT")
+                case "WGL_ARB_pixel_format":
+                    win32.gl_set_proc_address(&win32.wglChoosePixelFormatARB, "wglChoosePixelFormatARB")
+
+            }
+        }
+
+        pixel_attribute_list := []c.int{
+            win32.WGL_DRAW_TO_WINDOW_ARB, 1,
+            win32.WGL_SUPPORT_OPENGL_ARB, 1,
+            win32.WGL_DOUBLE_BUFFER_ARB, 1,
+            win32.WGL_PIXEL_TYPE_ARB, win32.WGL_TYPE_RGBA_ARB,
+            win32.WGL_COLOR_BITS_ARB, 32,
+            win32.WGL_DEPTH_BITS_ARB, 24,
+            win32.WGL_STENCIL_BITS_ARB, 8,
+            0 // End
+        }
+
+        pixel_format: c.int = ---
+        number_of_formats: win32.DWORD = ---
+        if !win32.wglChoosePixelFormatARB(
+            device_context,
+            raw_data(pixel_attribute_list),
+            nil,
+            1,
+            &pixel_format,
+            &number_of_formats) {
+                log.error("Could not choose a pixel format.")
+                return .Failed
+            }
+
+        if !win32.SetPixelFormat(device_context, pixel_format, &pixel_format_descriptor) {
+                log.error("Could not set the pixel format")
+                return .Failed
+        }
+
+        context_attribute_list := []c.int {
+            win32.WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
+            win32.WGL_CONTEXT_MINOR_VERSION_ARB, 1,
+            0 // End
+        }
+
+        // Delete the dummy context
+        win32.wglDeleteContext(render_context)
+
+        render_context := win32.wglCreateContextAttribsARB(device_context, nil, raw_data(context_attribute_list))
+        if !win32.wglMakeCurrent(device_context, render_context) {
+            log.error("Could not make render context current.")
+            return .Failed
+        }
+    }
+
+
+    origami_window.device_context = device_context
+    origami_window.render_context = render_context
+
+    return
 }

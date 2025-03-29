@@ -1,6 +1,8 @@
 package OrigamiRenderer
 
 import "base:runtime"
+import "core:log"
+import "core:fmt"
 
 import win32 "core:sys/windows"
 
@@ -15,6 +17,18 @@ when TRACE {
 } else {
     trace :: proc(_: ^spall.Context, _: ^spall.Buffer, _: string) {}
 }
+
+// Note(Pete): Uncomment to trace every proc
+// @(instrumentation_enter)
+// spall_enter :: proc "contextless" (proc_address, call_site_return_address: rawptr, loc: runtime.Source_Code_Location) {
+// 	spall._buffer_begin(&spall_ctx, &spall_buffer, "", "", loc)
+// }
+
+// @(instrumentation_exit)
+// spall_exit :: proc "contextless" (proc_address, call_site_return_address: rawptr, loc: runtime.Source_Code_Location) {
+// 	spall._buffer_end(&spall_ctx, &spall_buffer)
+// }
+
 
 Colour3 :: [3]f32
 Colour4 :: [4]f32
@@ -46,6 +60,7 @@ Window_Info_Base :: struct {
 Win32_Window_Info :: struct {
     using base: Window_Info_Base,
     hwnd: win32.HWND,
+    device_context: win32.HDC
 }
 
 Render_API :: enum {
@@ -67,6 +82,7 @@ Renderer_Error :: enum {
 Error :: union #shared_nil {
     Renderer_Error,
     Vulkan_Error,
+    OpenGL_Error
 }
 
 renderer: ^Renderer

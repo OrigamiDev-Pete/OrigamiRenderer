@@ -747,8 +747,8 @@ create_graphics_pipeline :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
     // defer vk.DestroyShaderModule(r.device, vert_shader_module, nil)
     // defer vk.DestroyShaderModule(r.device, frag_shader_module, nil)
 
-    vert_handle, vert_err := _vk_create_shader(r, vert_shader_code)
-    frag_handle, frag_err := _vk_create_shader(r, frag_shader_code)
+    vert_handle, vert_err := _vk_create_shader(r, vert_shader_code, .Vertex)
+    frag_handle, frag_err := _vk_create_shader(r, frag_shader_code, .Fragment)
     // vert_shader_module := r.shaders[vert_handle].module
     // frag_shader_module := r.shaders[frag_handle].module
 
@@ -988,7 +988,7 @@ _vk_render :: proc(r: ^Vulkan_Renderer) -> (err: Vulkan_Error) {
         return .Cannot_Acquire_Swap_Chain_Image
     }
 
-    // Only reset the fencce if we are submitting work
+    // Only reset the fence if we are submitting work
     vk.ResetFences(r.device, 1, &r.in_flight_fences[r.current_frame])
 
     vk.ResetCommandBuffer(r.command_buffers[r.current_frame], {})

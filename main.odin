@@ -62,7 +62,8 @@ run :: proc() -> int {
 
 setup_window_callbacks :: proc(window: ^op.Window) {
 	op.window_set_on_resize_callback(window, proc(window: ^op.Window, width, height: u16) {
-		log.debug("Window resized to ", width, "x", height)
+		// log.debug("Window resized to ", width, "x", height)
+		or.trace(&or.spall_ctx, &or.spall_buffer, #procedure)
 		r := cast(^or.Renderer_Base) or.renderer
 		r.framebuffer_resized = true
 		or.render(or.renderer)
@@ -77,6 +78,7 @@ get_platform_window_info :: proc(window: op.Window) -> (info: or.Window_Info) {
 	when ODIN_OS == .Windows {
 		win32_info: or.Win32_Window_Info
 		win32_info.hwnd = window.(op.Win32_Window).window_handle
+		win32_info.device_context = window.(op.Win32_Window).device_context
 
 		width, height := op.get_window_size(window)
 		win32_info.width = width
@@ -95,8 +97,8 @@ setup_scene :: proc(renderer: ^or.Renderer) {
 		{ { -0.5,  0.5 }, { 0, 0, 1 } },
 	}
 
-	vert_shader, _ := or.load_shader(renderer, "origamiRenderer/shaders/spirv/vert.spv")
-	frag_shader, _ := or.load_shader(renderer, "origamiRenderer/shaders/spirv/frag.spv")
+	vert_shader, _ := or.load_shader(renderer, "origamiRenderer/shaders/shader.vert", .Vertex)
+	frag_shader, _ := or.load_shader(renderer, "origamiRenderer/shaders/shader.frag", .Fragment)
 	program, _ := or.create_program(renderer, vert_shader, frag_shader)
 	material, _ := or.create_material(renderer, program, {{{ .Position, .Float32, 2 }, { .Colour, .Float32, 3 }}})
 
