@@ -16,6 +16,10 @@ OpenGL_Program :: struct {
     handle: u32
 }
 
+OpenGL_Material :: struct {
+    using base: Material_Base,
+}
+
 _gl_create_shader :: proc(r: ^OpenGL_Renderer, code: []u8, type: Shader_Type) -> (^OpenGL_Shader, OpenGL_Error) {
     gl_shader_type: u32 = ---
     switch type {
@@ -87,4 +91,13 @@ _gl_create_program :: proc(r: ^OpenGL_Renderer, vertex_shader, fragment_shader: 
     }
 
     return auto_cast program, nil
+}
+
+_gl_destroy_program :: proc(r: OpenGL_Renderer, program: ^OpenGL_Program) {
+    gl.DeleteProgram(program.handle)
+    free(program)
+}
+
+_gl_create_material :: proc(r: ^OpenGL_Renderer, program: ^OpenGL_Program) {
+    
 }
