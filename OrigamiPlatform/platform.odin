@@ -5,11 +5,12 @@ import win32 "core:sys/windows"
 
 @(private)
 Window_Base :: struct {
-    x:      i32,
-    y:      i32,
-    width:  i32,
-    height: i32,
-    title:  string,
+    x:         i32,
+    y:         i32,
+    width:     i32,
+    height:    i32,
+    frequency: i64,
+    title:     string,
 
     using callbacks: Window_Callbacks,
     odin_context: ^runtime.Context,
@@ -30,6 +31,12 @@ Window :: union {
 Window_Callbacks :: struct {
     on_resize: #type proc (window: ^Window, width, height: u16),
     on_close:  #type proc (window: ^Window),
+}
+
+Time_State :: struct {
+    ticks_per_second: i64,
+    last_counter:     i64, // Ticks at the start of the previous frame
+    delta_time:       f64, // Time elapsed in seconds
 }
 
 Window_Error :: enum u8 {
@@ -55,6 +62,10 @@ create_window :: proc(width, height: i32, title: string, x: i32 = 0, y: i32 = 0)
 
 destroy_window :: proc(window: ^Window) {
     _destroy_window(auto_cast window)
+}
+
+get_time :: proc(window: Window) -> f64 {
+    return _get_time(window.?);
 }
 
 window_should_close :: proc(window: ^Window) -> bool {

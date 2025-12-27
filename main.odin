@@ -14,6 +14,22 @@ import "core:prof/spall"
 WIDTH :: 800
 HEIGHT :: 600
 
+vertices := []or.Vertex{
+    // Position           // Normal       // UV
+    {{-0.5, -0.5, 0.0},   {0, 0, 1},      {0, 0}}, // Bottom Left
+    {{ 0.5, -0.5, 0.0},   {0, 0, 1},      {1, 0}}, // Bottom Right
+    {{ 0.5,  0.5, 0.0},   {0, 0, 1},      {1, 1}}, // Top Right
+    {{-0.5,  0.5, 0.0},   {0, 0, 1},      {0, 1}}, // Top Left
+}
+
+indices := []u32 {
+    0, 1, 2, // First Triangle
+    2, 3, 0, // Second Triangle
+}
+
+shader: or.Shader_Handle
+mesh: or.Mesh_Handle
+
 main :: proc() {
     context.logger = log.create_console_logger()
 	tracking_allocator: mem.Tracking_Allocator
@@ -38,21 +54,20 @@ run :: proc() -> int {
 	}
 	defer op.destroy_window(window)
 
-	renderer : ^or.Renderer = or.create_renderer(.OpenGL)
-	defer or.destroy_renderer(renderer)
-	if err := or.init_renderer(renderer, get_platform_window_info(window^)); err != nil {
+	window_info := get_platform_window_info(window^)
+	if err := or.init_renderer(window_info); err != nil {
 		log.error(err)
 		return 1
 	}
+	defer or.deinit_renderer()
 
     setup_window_callbacks(window)
-	setup_scene(renderer)
+
+	shader = or.load_shader(VS_SOURCE, FS_SOURCE)
+	mesh = or.create_mesh(vertices, indices)
 
 	for !op.window_should_close(window) {
-
-		if or.render(renderer) != nil {
-			return 1
-		}
+		render()
 
 		free_all(context.temp_allocator)
 	}
@@ -62,11 +77,13 @@ run :: proc() -> int {
 
 setup_window_callbacks :: proc(window: ^op.Window) {
 	op.window_set_on_resize_callback(window, proc(window: ^op.Window, width, height: u16) {
+		or.resize_viewport(get_platform_window_info(window^))
+		render()
 		// log.debug("Window resized to ", width, "x", height)
-		or.trace(&or.spall_ctx, &or.spall_buffer, #procedure)
-		r := cast(^or.Renderer_Base) or.renderer
-		r.framebuffer_resized = true
-		or.render(or.renderer)
+		// or.trace(&or.spall_ctx, &or.spall_buffer, #procedure)
+		// r := cast(^or.Renderer_Base) or.renderer
+		// r.framebuffer_resized = true
+		// or.render(or.renderer)
 	})
 
 	op.window_set_on_close_callback(window, proc(window: ^op.Window) {
@@ -89,18 +106,10 @@ get_platform_window_info :: proc(window: op.Window) -> (info: or.Window_Info) {
 	}
 }
 
-setup_scene :: proc(renderer: ^or.Renderer) {
-
-	triangle_vertices := []or.Vertex {
-		{ {  0.0, -0.5 }, { 1, 1, 1 } },
-		{ {  0.5,  0.5 }, { 0, 1, 0 } },
-		{ { -0.5,  0.5 }, { 0, 0, 1 } },
-	}
-
-	vert_shader, _ := or.load_shader(renderer, "origamiRenderer/shaders/shader.vert", .Vertex)
-	frag_shader, _ := or.load_shader(renderer, "origamiRenderer/shaders/shader.frag", .Fragment)
-	program, _ := or.create_program(renderer, vert_shader, frag_shader)
-	material, _ := or.create_material(renderer, program, {{{ .Position, .Float32, 2 }, { .Colour, .Float32, 3 }}})
-
-	triangle, _ := or.create_mesh(renderer, slice.clone(triangle_vertices), material)
+render :: proc() {
+	or.begin_frame()
+	or.clear_screen({ 1.0, 0.0, 1.0, 1.0 })
+	or.set_shader(shader)
+	or.draw_mesh(mesh)
+	or.end_frame()
 }

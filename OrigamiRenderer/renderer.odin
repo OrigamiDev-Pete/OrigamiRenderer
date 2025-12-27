@@ -1,50 +1,43 @@
 package OrigamiRenderer
 
-import "base:runtime"
-import "core:log"
-import "core:fmt"
-
+import "core:mem"
 import win32 "core:sys/windows"
 
-import "core:prof/spall"
-spall_ctx: spall.Context
-spall_buffer: spall.Buffer
-spall_backing_buffer: []u8
-
-TRACE :: #config(TRACE, false)
-when TRACE {
-    trace :: spall.SCOPED_EVENT
-} else {
-    trace :: proc(_: ^spall.Context, _: ^spall.Buffer, _: string) {}
-}
-
-// Note(Pete): Uncomment to trace every proc
-// @(instrumentation_enter)
-// spall_enter :: proc "contextless" (proc_address, call_site_return_address: rawptr, loc: runtime.Source_Code_Location) {
-// 	spall._buffer_begin(&spall_ctx, &spall_buffer, "", "", loc)
-// }
-
-// @(instrumentation_exit)
-// spall_exit :: proc "contextless" (proc_address, call_site_return_address: rawptr, loc: runtime.Source_Code_Location) {
-// 	spall._buffer_end(&spall_ctx, &spall_buffer)
-// }
-
+API :: #config(RENDER_API, Renderer_API.OpenGL)
 
 Colour3 :: [3]f32
 Colour4 :: [4]f32
 
-Renderer_Base :: struct {
-    window_info: Window_Info,
-    clear_colour: Colour4,
-    framebuffer_resized: bool,
-    skip_render: bool,
-    meshes: [dynamic]^Mesh,
-    materials: [dynamic]^Material,
+Mesh_Handle :: distinct u32
+Shader_Handle :: distinct u32
+
+INVALID_MESH :: Mesh_Handle(0)
+INVALID_SHADER :: Shader_Handle(0)
+
+Vertex :: struct {
+    position: [3]f32,
+    normal:   [3]f32,
+    uv:       [2]f32
 }
 
-Renderer :: union {
-    Vulkan_Renderer,
-    OpenGL_Renderer
+Mesh :: struct {
+    vao: u32,
+    vbo: u32,
+    ibo: u32,
+    index_count: i32
+}
+
+Renderer :: struct {
+    window_info: Window_Info,
+    command_allocator: mem.Allocator,
+    command_arena: mem.Arena,
+    command_queue: [dynamic]Render_Packet,
+    shaders: [dynamic]u32,
+    meshes: [dynamic]Mesh
+}
+
+Renderer_API :: enum u8 {
+    OpenGL
 }
 
 Window_Info :: union {
@@ -63,114 +56,77 @@ Win32_Window_Info :: struct {
     device_context: win32.HDC
 }
 
-Render_API :: enum {
-    Vulkan,
-    OpenGL,
-    // D3D11,
-    // D3D12,
-    // Metal,
-    // WebGL,
-    // WebGPU,
+Error :: enum {
+    None
 }
 
-Renderer_Error :: enum {
-    None,
-    Cannot_Load_Shader,
-    Invalid_Renderer,
-}
+renderer: Renderer
 
-Error :: union #shared_nil {
-    Renderer_Error,
-    Vulkan_Error,
-    OpenGL_Error
-}
+init_renderer :: proc(window_info: Window_Info) -> (err: Error) {
+    bytes := make([]u8, 1 * 1024 * 1024) // 1MB
+    mem.arena_init(&renderer.command_arena, bytes)
+    renderer.command_allocator = mem.arena_allocator(&renderer.command_arena)
+    renderer.command_queue = make([dynamic]Render_Packet, renderer.command_allocator)
+    renderer.window_info = window_info
 
-renderer: ^Renderer
-
-@(private)
-ctx: ^runtime.Context
-
-create_renderer :: proc(type: Render_API) -> ^Renderer {
-    trace(&spall_ctx, &spall_buffer, #procedure)
-    switch type {
-        case .Vulkan:
-            renderer = new(Renderer)
-            renderer^ = Vulkan_Renderer{}
-            return renderer
-        case .OpenGL:
-            renderer = new(Renderer)
-            renderer^ = OpenGL_Renderer{}
-            return renderer
-        case:
-            return renderer
-    }
-}
-
-init_renderer :: proc(renderer: ^Renderer, window_info: Window_Info) -> (err: Error) {
-    ctx = new_clone(context)
-
-    when TRACE {
-        spall_ctx = spall.context_create("renderer.spall")
-        spall_backing_buffer = make([]u8, spall.BUFFER_DEFAULT_SIZE)
-        spall_buffer = spall.buffer_create(spall_backing_buffer)
-        spall.SCOPED_EVENT(&spall_ctx, &spall_buffer, #procedure)
+    when API == .OpenGL {
+        _gl_init_renderer()
     }
 
-    r := cast(^Renderer_Base) renderer
-    r.clear_colour = { 0, 0, 0, 1.0 }
-
-    switch r in renderer {
-        case Vulkan_Renderer:
-            return _vk_init_renderer(auto_cast renderer, window_info)
-        case OpenGL_Renderer:
-            return _gl_init_renderer(auto_cast renderer, window_info)
-    }
     return
 }
 
-render :: proc(renderer: ^Renderer) -> (err: Error) {
-    trace(&spall_ctx, &spall_buffer, #procedure)
-    switch r in renderer {
-        case Vulkan_Renderer:
-            return _vk_render(auto_cast renderer)
-        case OpenGL_Renderer:
-            return _gl_render(auto_cast renderer)
-    }
-    return
+deinit_renderer :: proc() {
+    delete(renderer.command_arena.data)
+    delete(renderer.shaders)
+    delete(renderer.meshes)
 }
 
-destroy_renderer :: proc(renderer: ^Renderer) {
-    trace(&spall_ctx, &spall_buffer, #procedure)
-    defer free(ctx)
-    switch r in renderer {
-        case Vulkan_Renderer:
-            _vk_destroy_renderer(auto_cast renderer)
-        case OpenGL_Renderer:
-            _gl_destroy_renderer(auto_cast renderer)
-    }
+begin_frame :: proc() {
 
-    r := cast(^Renderer_Base) renderer
-    delete(r.meshes)
-    delete(r.materials)
-
-    free(renderer)
-
-    when TRACE {
-        spall.buffer_destroy(&spall_ctx, &spall_buffer)
-        spall.context_destroy(&spall_ctx)
-        delete(spall_backing_buffer)
-    }
 }
 
-update_window_info_size :: proc(window_info: ^Window_Info) {
-    trace(&spall_ctx, &spall_buffer, #procedure)
+end_frame :: proc() {
+    // Sort by sort_key here //
+
+    when API == .OpenGL {
+        _gl_end_frame()
+    }
+
+    free_all(renderer.command_allocator)
+
     when ODIN_OS == .Windows {
-        rect: win32.RECT
-        wi, ok := &window_info.(Win32_Window_Info)
-        if ok {
-            win32.GetClientRect(wi.hwnd, &rect)
-            wi.width = cast(int) rect.right
-            wi.height = cast(int) rect.bottom
-        }
+        win32.SwapBuffers(renderer.window_info.(Win32_Window_Info).device_context)
     }
+}
+
+resize_viewport :: proc(window_info: Window_Info) {
+    renderer.window_info = window_info
+}
+
+clear_screen :: proc(colour: Colour4) {
+    cmd := Command_Clear { colour = colour, depth = 1.0 }
+    append(&renderer.command_queue, Render_Packet { sort_key = 0, command = cmd })
+}
+
+load_shader :: proc(vertex_source, fragment_source: string) -> Shader_Handle {
+    when API == .OpenGL {
+        return _gl_load_shader(vertex_source, fragment_source)
+    }
+}
+
+set_shader :: proc(shader: Shader_Handle) {
+    cmd := Command_Set_Shader { shader }
+    append(&renderer.command_queue, Render_Packet { sort_key = 0, command = cmd })
+}
+
+create_mesh :: proc(vertices: []Vertex, indices: []u32) -> Mesh_Handle {
+    when API == .OpenGL {
+        return _gl_create_mesh(vertices, indices)
+    }
+}
+
+draw_mesh :: proc(mesh: Mesh_Handle) {
+    cmd := Command_Draw { mesh }
+    append(&renderer.command_queue, Render_Packet { sort_key = 0, command = cmd })
 }

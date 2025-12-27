@@ -61,8 +61,8 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32, should_crea
     wc.style = win32.CS_HREDRAW | win32.CS_VREDRAW | win32.CS_OWNDC
     wc.lpfnWndProc = window_proc
     wc.hInstance = cast(win32.HINSTANCE) win32.GetModuleHandleW(nil)
-    wc.lpszClassName = &class_name[0]
-    wc.hCursor = win32.LoadCursorW(nil, cast([^]u16)&win32.IDC_ARROW)
+    wc.lpszClassName = cstring16(class_name)
+    wc.hCursor = win32.LoadCursorW(nil, transmute(cstring16) win32.IDC_ARROW)
 
     win32.RegisterClassW(&wc)
 
@@ -82,7 +82,7 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32, should_crea
     }
     origami_window = auto_cast window
 
-    hWnd := win32.CreateWindowW(wc.lpszClassName, &utf16_title[0], win32.WS_OVERLAPPEDWINDOW, x, y, width, height, nil, nil, wc.hInstance, nil)
+    hWnd := win32.CreateWindowW(wc.lpszClassName, cstring16(raw_data(utf16_title)), win32.WS_OVERLAPPEDWINDOW, x, y, width, height, nil, nil, wc.hInstance, nil)
 
     if hWnd == nil {
         return auto_cast window, .Failed
@@ -101,6 +101,12 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32, should_crea
 _destroy_window :: proc(window: ^Win32_Window) {
     free(window.odin_context)
     free(window)
+}
+
+_get_time :: proc(window: Win32_Window) -> f64 {
+    counter: win32.LARGE_INTEGER
+    win32.QueryPerformanceCounter(&counter)
+    return f64(counter) / f64(window.frequency)
 }
 
 _window_should_close :: proc(window: ^Win32_Window) -> bool {
@@ -142,7 +148,7 @@ create_context :: proc() -> (err: Window_Error) {
 
     render_context := win32.wglCreateContext(device_context)
     if render_context == nil {
-        log.error("Could not create dummy render context")
+        log.error("Could not create the dummy render context.")
         return
     }
     win32.wglMakeCurrent(device_context, render_context)
@@ -197,29 +203,37 @@ create_context :: proc() -> (err: Window_Error) {
             }
 
         if !win32.SetPixelFormat(device_context, pixel_format, &pixel_format_descriptor) {
-                log.error("Could not set the pixel format")
+                log.error("Could not set the pixel format.")
                 return .Failed
         }
 
         context_attribute_list := []c.int {
             win32.WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
-            win32.WGL_CONTEXT_MINOR_VERSION_ARB, 1,
+            win32.WGL_CONTEXT_MINOR_VERSION_ARB, 6,
+            win32.WGL_CONTEXT_PROFILE_MASK_ARB, win32.WGL_CONTEXT_CORE_PROFILE_BIT_ARB, // Removes the deprecated functions
+            win32.WGL_CONTEXT_FLAGS_ARB, win32.WGL_CONTEXT_DEBUG_BIT_ARB, // For debugging
             0 // End
         }
 
         // Delete the dummy context
+        win32.wglMakeCurrent(nil, nil)
         win32.wglDeleteContext(render_context)
 
-        render_context := win32.wglCreateContextAttribsARB(device_context, nil, raw_data(context_attribute_list))
+        render_context = win32.wglCreateContextAttribsARB(device_context, nil, raw_data(context_attribute_list))
         if !win32.wglMakeCurrent(device_context, render_context) {
-            log.error("Could not make render context current.")
+            log.error("Could not make the render context current.")
             return .Failed
         }
+
+        gl.load_up_to(4, 6, win32.gl_set_proc_address)
     }
 
 
     origami_window.device_context = device_context
     origami_window.render_context = render_context
+    gl.load_up_to(4, 6, win32.gl_set_proc_address)
+    log.debug(gl.GetString(gl.VERSION))
+
 
     return
 }
