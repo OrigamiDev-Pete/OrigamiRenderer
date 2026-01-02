@@ -66,8 +66,6 @@ run :: proc() -> int {
 
     setup_window_callbacks(window)
 
-	a, e := os.current_process_info({.Working_Dir}, context.allocator)
-	log.debug(a.working_dir)
 	defer os.free_process_info(a, context.allocator)
 	shader = or.load_shader(VS_SOURCE, FS_SOURCE)
 	mesh = or.create_mesh(vertices, indices)

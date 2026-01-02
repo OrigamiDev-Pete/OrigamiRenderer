@@ -176,6 +176,7 @@ _gl_create_texture :: proc(img: ^image.Image) -> Texture_Handle {
         }
         target_y += 1
     }
+    defer delete(flipped_buffer)
 
     if img.channels == 3 {
         internal_format = gl.SRGB8
