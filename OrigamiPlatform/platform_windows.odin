@@ -12,14 +12,79 @@ import win32 "core:sys/windows"
 
 import gl "vendor:OpenGL"
 
-origami_window: ^Win32_Window = nil
+origami_window: ^Window = nil
 
 CLASS_NAME :: "Origami Window Class"
+
+Platform_Key :: enum {
+    BACKSPACE = 8,
+    TAB       = 9,
+    ENTER     = 13,
+    SHIFT     = 16,
+    CONTROL   = 17,
+    ALT       = 18,
+    ESC       = 27,
+    PAGE_UP   = 33,
+    PAGE_DOWN = 34,
+    END       = 35,
+    HOME      = 36,
+    LEFT      = 37,
+    UP        = 38,
+    RIGHT     = 39,
+    DOWN      = 40,
+    INSERT    = 45,
+    DELETE    = 46,
+    N0        = 48,
+    N1, N2, N3, N4, N5, N6, N7, N8, N9,
+    CAPS_LOCK = 58,
+    A         = 65,
+    B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+    L_META    = 91,
+    R_META    = 92,
+    F1        = 112,
+    F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+    SEMICOLON = 186,
+    EQUALS    = 187,
+    COMMA     = 188,
+    DASH      = 189,
+    PERIOD    = 190,
+    F_SLASH   = 191,
+    BACKTICK  = 192,
+    R_BRACE   = 219,
+    B_SLASH   = 220,
+    L_BRACE   = 221,
+    QUOTE     = 222,
+}
 
 window_proc :: proc "stdcall" (hWnd: win32.HWND, msg: win32.UINT, wParam: win32.WPARAM, lParam: win32.LPARAM) -> win32.LRESULT {
     context = origami_window.odin_context^
 
     switch msg {
+        case win32.WM_SYSKEYDOWN: fallthrough
+        case win32.WM_KEYDOWN:
+            virtual_key := win32.LOWORD(wParam)
+            meta := win32.HIWORD(lParam)
+            key_event := Key_Event {
+                key_code = Platform_Key(virtual_key),
+                shift_pressed = win32.GetKeyState(win32.VK_SHIFT) & 0x80 != 0,
+                control_pressed = win32.GetKeyState(win32.VK_CONTROL) & 0x80 != 0,
+                alt_pressed = win32.GetKeyState(win32.VK_MENU) & 0x80 != 0
+            }
+            if origami_window.callbacks.on_keydown != nil {
+                origami_window.callbacks.on_keydown(origami_window, key_event)
+            }
+            return 0
+        case win32.WM_SYSCHAR: fallthrough
+        case win32.WM_CHAR:
+            key := win32.LOWORD(wParam)
+            meta := win32.HIWORD(lParam)
+            key_event := Key_Event {
+                key_code = Platform_Key(key)
+            }
+            if origami_window.callbacks.on_character != nil {
+                origami_window.callbacks.on_character(origami_window, key_event)
+            }
+            return 0
         case win32.WM_SIZE: {
             when ODIN_DEBUG {
                 fmt.println("WM_SIZE")
@@ -71,7 +136,7 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32, should_crea
 
     ctx := new_clone(context)
     window := new(Window)
-    window^ = Win32_Window {
+    window^ = Window {
         width = width,
         height = height,
         title = title,
@@ -79,37 +144,41 @@ _create_window :: proc(width, height: i32, title: string, x, y: i32, should_crea
         y = y,
         callbacks = {},
         odin_context = ctx,
+        platform_data = Win32_Window{}
     }
-    origami_window = auto_cast window
+    origami_window = window
 
     hWnd := win32.CreateWindowW(wc.lpszClassName, cstring16(raw_data(utf16_title)), win32.WS_OVERLAPPEDWINDOW, x, y, width, height, nil, nil, wc.hInstance, nil)
 
     if hWnd == nil {
-        return auto_cast window, .Failed
+        return window, .Failed
     }
 
-    w := &window.(Win32_Window)
-    w.window_handle = hWnd
+    p := &window.platform_data.(Win32_Window)
+    p.window_handle = hWnd
 
     if should_create_context do create_context()
 
     win32.ShowWindow(hWnd, win32.SW_SHOWDEFAULT)
+    win32.QueryPerformanceFrequency(auto_cast &window.frequency)
+    win32.QueryPerformanceCounter(auto_cast &start_time)
 
-    return auto_cast window, .None
+    return window, .None
 }
 
-_destroy_window :: proc(window: ^Win32_Window) {
+_destroy_window :: proc(window: ^Window) {
     free(window.odin_context)
     free(window)
 }
 
-_get_time :: proc(window: Win32_Window) -> f64 {
+_get_time :: proc(window: Window) -> f64 {
     counter: win32.LARGE_INTEGER
     win32.QueryPerformanceCounter(&counter)
-    return f64(counter) / f64(window.frequency)
+    elapsed := i64(counter) - start_time
+    return f64(elapsed) / f64(window.frequency)
 }
 
-_window_should_close :: proc(window: ^Win32_Window) -> bool {
+_window_should_close :: proc(window: ^Window) -> bool {
     should_quit := false
     msg: win32.MSG
     for win32.PeekMessageW(&msg, nil, 0, 0, win32.PM_REMOVE) {
@@ -120,9 +189,9 @@ _window_should_close :: proc(window: ^Win32_Window) -> bool {
     return should_quit
 }
 
-_get_window_size :: proc(window: Win32_Window) -> (int, int) {
+_get_window_size :: proc(window: Window) -> (int, int) {
     rect: win32.RECT
-    win32.GetClientRect(window.window_handle, &rect)
+    win32.GetClientRect(window.platform_data.(Win32_Window).window_handle, &rect)
 
     return  int(rect.right), int(rect.bottom)
 }
@@ -141,7 +210,7 @@ create_context :: proc() -> (err: Window_Error) {
         iLayerType = win32.PFD_MAIN_PLANE
     }
 
-    device_context := win32.GetDC(origami_window.window_handle)
+    device_context := win32.GetDC(origami_window.platform_data.(Win32_Window).window_handle)
 
     pixel_format := win32.ChoosePixelFormat(device_context, &pixel_format_descriptor)
     win32.SetPixelFormat(device_context, pixel_format, &pixel_format_descriptor)
@@ -159,81 +228,75 @@ create_context :: proc() -> (err: Window_Error) {
     version: i32
     gl.GetIntegerv(gl.MAJOR_VERSION, &version)
 
-    // If we only acquire a 1.0 context we need to create a newer context directly.
-    if (version <= 1) {
-        win32.gl_set_proc_address(&win32.wglGetExtensionsStringARB, "wglGetExtensionsStringARB")
-        available_extensions_string := win32.wglGetExtensionsStringARB(device_context)
+    win32.gl_set_proc_address(&win32.wglGetExtensionsStringARB, "wglGetExtensionsStringARB")
+    available_extensions_string := win32.wglGetExtensionsStringARB(device_context)
 
-        available_extensions := strings.split(string(available_extensions_string), " ")
-        defer delete(available_extensions)
-        for extension in available_extensions {
-            switch extension {
-                case "WGL_ARB_create_context":
-                    win32.gl_set_proc_address(&win32.wglCreateContextAttribsARB, "wglCreateContextAttribsARB")
-                case "WGL_EXT_swap_control":
-                    win32.gl_set_proc_address(&win32.wglSwapIntervalEXT, "wglSwapIntervalEXT")
-                case "WGL_ARB_pixel_format":
-                    win32.gl_set_proc_address(&win32.wglChoosePixelFormatARB, "wglChoosePixelFormatARB")
+    available_extensions := strings.split(string(available_extensions_string), " ")
+    defer delete(available_extensions)
+    for extension in available_extensions {
+        switch extension {
+            case "WGL_ARB_create_context":
+                win32.gl_set_proc_address(&win32.wglCreateContextAttribsARB, "wglCreateContextAttribsARB")
+            case "WGL_EXT_swap_control":
+                win32.gl_set_proc_address(&win32.wglSwapIntervalEXT, "wglSwapIntervalEXT")
+            case "WGL_ARB_pixel_format":
+                win32.gl_set_proc_address(&win32.wglChoosePixelFormatARB, "wglChoosePixelFormatARB")
 
-            }
         }
+    }
 
-        pixel_attribute_list := []c.int{
-            win32.WGL_DRAW_TO_WINDOW_ARB, 1,
-            win32.WGL_SUPPORT_OPENGL_ARB, 1,
-            win32.WGL_DOUBLE_BUFFER_ARB, 1,
-            win32.WGL_PIXEL_TYPE_ARB, win32.WGL_TYPE_RGBA_ARB,
-            win32.WGL_COLOR_BITS_ARB, 32,
-            win32.WGL_DEPTH_BITS_ARB, 24,
-            win32.WGL_STENCIL_BITS_ARB, 8,
-            0 // End
-        }
+    pixel_attribute_list := []c.int{
+        win32.WGL_DRAW_TO_WINDOW_ARB, 1,
+        win32.WGL_SUPPORT_OPENGL_ARB, 1,
+        win32.WGL_DOUBLE_BUFFER_ARB, 1,
+        win32.WGL_PIXEL_TYPE_ARB, win32.WGL_TYPE_RGBA_ARB,
+        win32.WGL_COLOR_BITS_ARB, 32,
+        win32.WGL_DEPTH_BITS_ARB, 24,
+        win32.WGL_STENCIL_BITS_ARB, 8,
+        0 // End
+    }
 
-        pixel_format: c.int = ---
-        number_of_formats: win32.DWORD = ---
-        if !win32.wglChoosePixelFormatARB(
-            device_context,
-            raw_data(pixel_attribute_list),
-            nil,
-            1,
-            &pixel_format,
-            &number_of_formats) {
-                log.error("Could not choose a pixel format.")
-                return .Failed
-            }
-
-        if !win32.SetPixelFormat(device_context, pixel_format, &pixel_format_descriptor) {
-                log.error("Could not set the pixel format.")
-                return .Failed
-        }
-
-        context_attribute_list := []c.int {
-            win32.WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
-            win32.WGL_CONTEXT_MINOR_VERSION_ARB, 6,
-            win32.WGL_CONTEXT_PROFILE_MASK_ARB, win32.WGL_CONTEXT_CORE_PROFILE_BIT_ARB, // Removes the deprecated functions
-            win32.WGL_CONTEXT_FLAGS_ARB, win32.WGL_CONTEXT_DEBUG_BIT_ARB, // For debugging
-            0 // End
-        }
-
-        // Delete the dummy context
-        win32.wglMakeCurrent(nil, nil)
-        win32.wglDeleteContext(render_context)
-
-        render_context = win32.wglCreateContextAttribsARB(device_context, nil, raw_data(context_attribute_list))
-        if !win32.wglMakeCurrent(device_context, render_context) {
-            log.error("Could not make the render context current.")
+    number_of_formats: win32.DWORD = ---
+    if !win32.wglChoosePixelFormatARB(
+        device_context,
+        raw_data(pixel_attribute_list),
+        nil,
+        1,
+        &pixel_format,
+        &number_of_formats) {
+            log.error("Could not choose a pixel format.")
             return .Failed
         }
 
-        gl.load_up_to(4, 6, win32.gl_set_proc_address)
+    if !win32.SetPixelFormat(device_context, pixel_format, &pixel_format_descriptor) {
+            log.error("Could not set the pixel format.")
+            return .Failed
     }
 
+    context_attribute_list := []c.int {
+        win32.WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
+        win32.WGL_CONTEXT_MINOR_VERSION_ARB, 6,
+        win32.WGL_CONTEXT_PROFILE_MASK_ARB, win32.WGL_CONTEXT_CORE_PROFILE_BIT_ARB, // Removes the deprecated functions
+        win32.WGL_CONTEXT_FLAGS_ARB, win32.WGL_CONTEXT_DEBUG_BIT_ARB, // For debugging
+        0 // End
+    }
 
-    origami_window.device_context = device_context
-    origami_window.render_context = render_context
+    // Delete the dummy context
+    win32.wglMakeCurrent(nil, nil)
+    win32.wglDeleteContext(render_context)
+
+    render_context = win32.wglCreateContextAttribsARB(device_context, nil, raw_data(context_attribute_list))
+    if !win32.wglMakeCurrent(device_context, render_context) {
+        log.error("Could not make the render context current.")
+        return .Failed
+    }
+
     gl.load_up_to(4, 6, win32.gl_set_proc_address)
-    log.debug(gl.GetString(gl.VERSION))
 
+    win32_window_data := &origami_window.platform_data.(Win32_Window)
+    win32_window_data.device_context = device_context
+    win32_window_data.render_context = render_context
+    log.debug(gl.GetString(gl.VERSION))
 
     return
 }
