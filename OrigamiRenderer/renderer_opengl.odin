@@ -2,12 +2,20 @@
 package OrigamiRenderer
 
 import gl "vendor:OpenGL"
+import "core:math/linalg"
 import "core:log"
 import "core:strings"
 
 _gl_init_renderer :: proc() {
     gl.Enable(gl.DEPTH_TEST)
-    gl.Enable(gl.CULL_FACE)
+    gl.Disable(gl.CULL_FACE)
+
+    // Initialise scene UBO
+    gl.CreateBuffers(1, &renderer.scene_ubo)
+    gl.NamedBufferStorage(renderer.scene_ubo, size_of(Scene_State), nil, gl.DYNAMIC_STORAGE_BIT)
+    
+    // Bind the scene UBO to slot 0
+    gl.BindBufferBase(gl.UNIFORM_BUFFER, 0, renderer.scene_ubo)
 }
 
 _gl_end_frame :: proc() {
@@ -44,6 +52,11 @@ _gl_end_frame :: proc() {
                 }
         }
     }
+}
+
+_gl_update_scene_state :: proc() {
+    renderer.scene_state.view_projection = linalg.matrix_mul(renderer.scene_state.projection, renderer.scene_state.view)
+    gl.NamedBufferSubData(renderer.scene_ubo, 0, size_of(Scene_State), &renderer.scene_state)
 }
 
 _gl_load_shader :: proc(vertex_source, fragment_source: string) -> Shader_Handle {
