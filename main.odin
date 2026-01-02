@@ -66,7 +66,6 @@ run :: proc() -> int {
 
     setup_window_callbacks(window)
 
-	defer os.free_process_info(a, context.allocator)
 	shader = or.load_shader(VS_SOURCE, FS_SOURCE)
 	mesh = or.create_mesh(vertices, indices)
 	texture = or.load_texture("textures/wood_planks_diff_4k.jpg")
