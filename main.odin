@@ -5,7 +5,7 @@ import "core:math/linalg"
 import "core:fmt"
 import "core:log"
 import "core:mem"
-import "core:os"
+import os "core:os/os2"
 import "core:slice"
 
 import op "OrigamiPlatform"
@@ -18,10 +18,10 @@ HEIGHT :: 600
 
 vertices := []or.Vertex{
     // Position           // Normal       // UV
-    {{-0.5, -0.5, 0.0},   {0, 0, 1},      {0, 0}}, // Bottom Left
-    {{ 0.5, -0.5, 0.0},   {0, 0, 1},      {1, 0}}, // Bottom Right
-    {{ 0.5,  0.5, 0.0},   {0, 0, 1},      {1, 1}}, // Top Right
-    {{-0.5,  0.5, 0.0},   {0, 0, 1},      {0, 1}}, // Top Left
+    {{-0.5, -0.5, 0.0}, {0, 0, 1}, {0, 0}}, // Bottom Left
+    {{ 0.5, -0.5, 0.0}, {0, 0, 1}, {1, 0}}, // Bottom Right
+    {{ 0.5,  0.5, 0.0}, {0, 0, 1}, {1, 1}}, // Top Right
+    {{-0.5,  0.5, 0.0}, {0, 0, 1}, {0, 1}}, // Top Left
 }
 
 indices := []u32 {
@@ -31,6 +31,7 @@ indices := []u32 {
 
 shader: or.Shader_Handle
 mesh: or.Mesh_Handle
+texture: or.Texture_Handle
 
 main :: proc() {
     context.logger = log.create_console_logger()
@@ -65,8 +66,13 @@ run :: proc() -> int {
 
     setup_window_callbacks(window)
 
+	a, e := os.current_process_info({.Working_Dir}, context.allocator)
+	log.debug(a.working_dir)
+	defer os.free_process_info(a, context.allocator)
 	shader = or.load_shader(VS_SOURCE, FS_SOURCE)
 	mesh = or.create_mesh(vertices, indices)
+	texture = or.load_texture("textures/wood_planks_diff_4k.jpg")
+	// texture = or.load_texture("textures/placeholder.png")
 
 	for !op.window_should_close(window) {
 		render(window^)
@@ -94,6 +100,9 @@ setup_window_callbacks :: proc(window: ^op.Window) {
 
 	op.window_set_on_keydown_callback(window, proc(window: ^op.Window, key_event: op.Key_Event) {
 		log.debug(key_event.key_code)
+		if key_event.key_code == .BACKTICK {
+			or.set_vsync(!or.renderer.vsync_enabled)
+		}
 	})
 }
 
@@ -136,8 +145,9 @@ render :: proc(window: op.Window) {
 	or.update_scene_state(eye, view, projection)
 
 
-	or.clear_screen({ 1.0, 0.0, 1.0, 1.0 })
+	or.clear_screen({ 0.1, 0.1, 0.2, 1.0 })
 	or.set_shader(shader)
+	or.bind_texture(0, texture)
 	or.draw_mesh(mesh)
 	or.end_frame()
 }

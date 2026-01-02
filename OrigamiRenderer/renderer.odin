@@ -1,8 +1,13 @@
 package OrigamiRenderer
 
 import "core:c"
+import "core:image"
+import "core:image/png"
+import "core:image/jpeg"
+import "core:fmt"
 import "core:mem"
 import "core:math/linalg"
+import "core:os/os2"
 import win32 "core:sys/windows"
 
 API :: #config(RENDER_API, Renderer_API.OpenGL)
@@ -12,9 +17,11 @@ Colour4 :: [4]f32
 
 Mesh_Handle :: distinct u32
 Shader_Handle :: distinct u32
+Texture_Handle :: distinct u32
 
 INVALID_MESH :: Mesh_Handle(0)
 INVALID_SHADER :: Shader_Handle(0)
+INVALID_TEXTURE :: Texture_Handle(0)
 
 Vertex :: struct {
     position: [3]f32,
@@ -29,6 +36,14 @@ Mesh :: struct {
     index_count: i32
 }
 
+Texture :: struct {
+    id:              u32,
+    width:           i32,
+    height:          i32,
+    internal_format: u32,
+    data_format:     u32
+}
+
 Scene_State :: struct {
     view:            linalg.Matrix4f32, // 64 bytes
     projection:      linalg.Matrix4f32, // 64 bytes
@@ -38,24 +53,21 @@ Scene_State :: struct {
 }
 
 Renderer :: struct {
-    window_info: Window_Info,
+    window_info:       Window_Info,
     command_allocator: mem.Allocator,
-    command_arena: mem.Arena,
-    command_queue: [dynamic]Render_Packet,
-    shaders: [dynamic]u32,
-    meshes: [dynamic]Mesh,
-    scene_state: Scene_State,
-    scene_ubo: u32,
+    command_arena:     mem.Arena,
+    command_queue:     [dynamic]Render_Packet,
+    shaders:           [dynamic]u32,
+    meshes:            [dynamic]Mesh,
+    textures:          [dynamic]Texture,
+    scene_state:       Scene_State,
+    scene_ubo:         u32,
+    vsync_enabled:     bool,
 }
 
 Renderer_API :: enum u8 {
     OpenGL
 }
-
-// Window_Info :: union {
-//     Window_Info_Base,
-//     Win32_Window_Info,
-// }
 
 Window_Info :: struct {
     width: int,
@@ -80,6 +92,7 @@ init_renderer :: proc(window_info: Window_Info) -> (err: Error) {
     renderer.command_allocator = mem.arena_allocator(&renderer.command_arena)
     renderer.command_queue = make([dynamic]Render_Packet, renderer.command_allocator)
     renderer.window_info = window_info
+    renderer.vsync_enabled = true
 
     when API == .OpenGL {
         _gl_init_renderer()
@@ -92,6 +105,7 @@ deinit_renderer :: proc() {
     delete(renderer.command_arena.data)
     delete(renderer.shaders)
     delete(renderer.meshes)
+    delete(renderer.textures)
 }
 
 begin_frame :: proc() {
@@ -153,7 +167,26 @@ update_scene_state :: proc(position: linalg.Vector3f32, view, projection: linalg
     }
 }
 
+load_texture :: proc(filepath: string) -> Texture_Handle {
+    img, err := image.load_from_file(filepath)
+    if err != nil {
+        fmt.println("Failed to load image: ", filepath, err)
+        return INVALID_TEXTURE
+    }
+    defer image.destroy(img)
+
+    when API == .OpenGL {
+        return _gl_create_texture(img)
+    }
+}
+
+bind_texture :: proc(slot: u32, texture: Texture_Handle) {
+    cmd := Command_Bind_Texture { slot, texture }
+    append(&renderer.command_queue, Render_Packet { sort_key = 0, command = cmd })
+}
+
 set_vsync :: proc(enabled: bool) {
+    renderer.vsync_enabled = enabled
     when ODIN_OS == .Windows {
         win32.wglSwapIntervalEXT(c.int(enabled))
     }

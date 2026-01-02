@@ -2,6 +2,8 @@
 package OrigamiRenderer
 
 import gl "vendor:OpenGL"
+import "core:mem"
+import "core:image"
 import "core:math/linalg"
 import "core:log"
 import "core:strings"
@@ -21,13 +23,19 @@ _gl_init_renderer :: proc() {
 _gl_end_frame :: proc() {
     for packet in renderer.command_queue {
         switch cmd in packet.command {
+            case Command_Bind_Texture:
+                if cmd.texture != INVALID_TEXTURE {
+                    index := int(cmd.texture) - 1
+                    gl_texture_id := renderer.textures[index].id
+                    gl.BindTextureUnit(cmd.slot, gl_texture_id)
+                } else {
+                    gl.BindTextureUnit(cmd.slot, 0)
+                }
+
             case Command_Clear:
                 gl.ClearColor(cmd.colour.r, cmd.colour.g, cmd.colour.b, cmd.colour.a)
                 gl.ClearDepth(f64(cmd.depth))
                 gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-
-            case Command_Set_View_Port:
-                gl.Viewport(cmd.x, cmd.y, cmd.w, cmd.h)
 
             case Command_Draw:
                 if cmd.mesh != INVALID_MESH {
@@ -50,6 +58,9 @@ _gl_end_frame :: proc() {
                         gl.UseProgram(gl_shader_handle)
                     }
                 }
+
+            case Command_Set_View_Port:
+                gl.Viewport(cmd.x, cmd.y, cmd.w, cmd.h)
         }
     }
 }
@@ -143,3 +154,61 @@ _gl_create_mesh :: proc(vertices: []Vertex, indices: []u32) -> Mesh_Handle {
     append(&renderer.meshes, m)
     return Mesh_Handle(len(renderer.meshes))
 }
+
+_gl_create_texture :: proc(img: ^image.Image) -> Texture_Handle {
+    width := i32(img.width)
+    height := i32(img.height)
+    internal_format := u32(gl.SRGB8_ALPHA8)
+    data_format := u32(gl.RGBA)
+
+    // Flip the buffer
+    width_in_bytes := img.width * img.channels
+    flipped_buffer := make([]byte, len(img.pixels.buf))
+    target_y := 0
+    for y := img.height - 1; y >= 0; y -= 1 {
+        for x := 0; x < width_in_bytes; x += img.channels {
+            flipped_buffer[target_y * width_in_bytes + x] = img.pixels.buf[y * width_in_bytes + x]
+            flipped_buffer[target_y * width_in_bytes + x + 1] = img.pixels.buf[y * width_in_bytes + x + 1]
+            flipped_buffer[target_y * width_in_bytes + x + 2] = img.pixels.buf[y * width_in_bytes + x + 2]
+            if (img.channels == 4) {
+                flipped_buffer[target_y * width_in_bytes + x + 3] = img.pixels.buf[y * width_in_bytes + x + 3]
+            }
+        }
+        target_y += 1
+    }
+
+    if img.channels == 3 {
+        internal_format = gl.SRGB8
+        data_format = gl.RGB
+    }
+
+    id: u32
+    gl.CreateTextures(gl.TEXTURE_2D, 1, &id)
+
+    // Mipmaps
+    mipmap_levels := i32(1)
+
+    gl.TextureParameteri(id, gl.TEXTURE_WRAP_S, gl.REPEAT)
+    gl.TextureParameteri(id, gl.TEXTURE_WRAP_T, gl.REPEAT)
+    gl.TextureParameteri(id, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.TextureParameteri(id, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+
+    gl.TextureStorage2D(id, mipmap_levels, internal_format, width, height)
+
+    gl.TextureSubImage2D(id, 0, 0, 0, width, height, data_format, gl.UNSIGNED_BYTE, raw_data(flipped_buffer))
+    gl.GenerateTextureMipmap(id)
+
+    texture := Texture {
+        id = id,
+        width = width,
+        height = height,
+        internal_format = internal_format,
+        data_format = data_format,
+    }
+
+    append(&renderer.textures, texture)
+
+    return Texture_Handle(len(renderer.textures))
+}
+
+_gl_destory_texure :: proc()

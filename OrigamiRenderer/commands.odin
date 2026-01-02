@@ -6,10 +6,16 @@ Render_Packet :: struct {
 }
 
 Render_Command :: union {
+    Command_Bind_Texture,
     Command_Clear,
     Command_Draw,
+    Command_Set_Shader,
     Command_Set_View_Port,
-    Command_Set_Shader
+}
+
+Command_Bind_Texture :: struct {
+    slot: u32,
+    texture: Texture_Handle
 }
 
 Command_Clear :: struct {
@@ -22,10 +28,11 @@ Command_Draw :: struct {
     mesh: Mesh_Handle
 }
 
+Command_Set_Shader :: struct {
+    shader: Shader_Handle
+}
+
 Command_Set_View_Port :: struct {
     x, y, w, h: i32
 }
 
-Command_Set_Shader :: struct {
-    shader: Shader_Handle
-}
